@@ -1,0 +1,19 @@
+﻿# Données (trop lourdes pour git)
+data/raw/
+data/processed/
+data/transformed/
+
+# Environnement
+.env
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Python
+*.egg-info/
+dist/
+build/
+
+# Docker
+*.log

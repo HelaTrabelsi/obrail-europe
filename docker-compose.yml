@@ -1,0 +1,92 @@
+version: "3.9"
+
+services:
+
+  # ─── Base de données PostgreSQL ────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: obrail_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: obrail_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d obrail_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Pipeline ETL ──────────────────────────────────────────────────────────
+  etl:
+    build:
+      context: .
+      dockerfile: Dockerfile.etl
+    container_name: obrail_etl
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    volumes:
+      - ./data:/app/data
+      - ./src:/app/src
+    command: python src/pipeline.py --step all
+
+  # ─── API FastAPI ───────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: obrail_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Dashboard Streamlit ───────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: obrail_dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      API_URL: http://api:8000
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:

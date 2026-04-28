@@ -1,0 +1,22 @@
+# --- Base de données ---
+sqlalchemy==2.0.30
+psycopg2-binary==2.9.9
+
+# --- API REST ---
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+
+# --- ETL & Data ---
+pandas==2.2.2
+numpy==1.26.4
+requests==2.31.0
+pyarrow==16.0.0
+
+# --- Dashboard ---
+streamlit==1.35.0
+plotly==5.22.0
+statsmodels==0.14.2
+
+# --- Utilitaires ---
+python-dotenv==1.0.1
