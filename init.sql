@@ -1,40 +1,50 @@
--- ============================================================
--- ObRail Europe — Initialisation de la base de données
--- RGPD : Aucune donnée personnelle n'est traitée.
--- Toutes les données sont issues de sources open data publiques.
--- ============================================================
 
--- Déssertes ferroviaires
-CREATE TABLE IF NOT EXISTS dessertes (
-    id                 SERIAL PRIMARY KEY,
-    operateur_nom      VARCHAR(100),
-    nom_ligne          TEXT,
-    type_ligne         VARCHAR(50),           -- national / regional
-    type_service       VARCHAR(20),           -- Jour / Nuit
-    gare_depart_nom    VARCHAR(200),
-    gare_arrivee_nom   VARCHAR(200),
-    heure_depart       TIME,
-    heure_arrivee      TIME,
-    distance_km        FLOAT,
-    emissions_co2_gkm  FLOAT,
-    source_donnee      VARCHAR(100),
-    created_at         TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(operateur_nom, gare_depart_nom, gare_arrivee_nom, heure_depart)
+CREATE TABLE IF NOT EXISTS operateur (
+    id_operateur  SERIAL       PRIMARY KEY,
+    nom           VARCHAR(100) NOT NULL UNIQUE,
+    pays          VARCHAR(10)  NOT NULL
 );
 
--- Index pour les recherches fréquentes
-CREATE INDEX IF NOT EXISTS idx_dessertes_operateur  ON dessertes(operateur_nom);
-CREATE INDEX IF NOT EXISTS idx_dessertes_gares       ON dessertes(gare_depart_nom, gare_arrivee_nom);
-CREATE INDEX IF NOT EXISTS idx_dessertes_type        ON dessertes(type_service, type_ligne);
-CREATE INDEX IF NOT EXISTS idx_dessertes_heure       ON dessertes(heure_depart);
+CREATE TABLE IF NOT EXISTS gare (
+    id_gare  SERIAL       PRIMARY KEY,
+    nom      VARCHAR(200) NOT NULL,
+    pays     VARCHAR(10)  NOT NULL,
+    UNIQUE   (nom, pays)
+);
 
--- Table de traçabilité des chargements ETL (conformité RGPD - transparence)
+CREATE TABLE IF NOT EXISTS trajet (
+    id_trajet  SERIAL   PRIMARY KEY,
+    id_gare    INTEGER  NOT NULL REFERENCES gare(id_gare),
+    distance   FLOAT
+);
+
+CREATE INDEX IF NOT EXISTS idx_trajet_gare ON trajet(id_gare);
+
+CREATE TABLE IF NOT EXISTS train (
+    id_train          SERIAL       PRIMARY KEY,
+    id_operateur      INTEGER      NOT NULL REFERENCES operateur(id_operateur),
+    id_trajet         INTEGER      NOT NULL REFERENCES trajet(id_trajet),
+    type_service      VARCHAR(20)  NOT NULL CHECK (type_service IN ('Jour','Nuit')),
+    type_ligne        VARCHAR(50)  NOT NULL CHECK (type_ligne IN ('national','regional')),
+    heure_depart      TIME         NOT NULL,
+    heure_arrivee     TIME         NOT NULL,
+    emission_co2_gkm  FLOAT,
+    source_donnee     VARCHAR(100),
+    created_at        TIMESTAMP    DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (id_operateur, id_trajet, heure_depart)
+);
+
+CREATE INDEX IF NOT EXISTS idx_train_operateur    ON train(id_operateur);
+CREATE INDEX IF NOT EXISTS idx_train_trajet       ON train(id_trajet);
+CREATE INDEX IF NOT EXISTS idx_train_type_service ON train(type_service);
+CREATE INDEX IF NOT EXISTS idx_train_heure        ON train(heure_depart);
+
 CREATE TABLE IF NOT EXISTS etl_logs (
-    id              SERIAL PRIMARY KEY,
-    run_date        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    etape           VARCHAR(50),    -- extract / transform / load
-    source          VARCHAR(200),
+    id                 SERIAL    PRIMARY KEY,
+    run_date           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    etape              VARCHAR(50),
+    source             VARCHAR(200),
     nb_enregistrements INTEGER,
-    statut          VARCHAR(20),    -- success / error
-    message         TEXT
+    statut             VARCHAR(20),
+    message            TEXT
 );

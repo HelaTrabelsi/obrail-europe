@@ -25,7 +25,7 @@ class ETLPipeline:
         print(f"{'='*60}")
 
     def run_extract(self):
-        print("\n🔵 ÉTAPE 1 : EXTRACTION DES DONNÉES")
+        print("\nÉTAPE 1 : EXTRACTION DES DONNÉES")
         try:
             success = self.extractor.run_extraction()
             self.log_step("Extraction", success)
