@@ -1,0 +1,166 @@
+version: "3.9"
+
+# ================================================================
+# ObRail Europe — Docker Compose
+# Services : db + airflow + api + dashboard
+# Airflow planifie le pipeline ETL toutes les heures
+# ================================================================
+
+x-airflow-common: &airflow-common
+  image: apache/airflow:2.8.0
+  environment:
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@airflow_db/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    # Variables pour que le DAG puisse acceder a PostgreSQL obrail
+    DB_HOST: db
+    DB_PORT: 5432
+    DB_NAME: obrail_db
+    DB_USER: postgres
+    DB_PASSWORD: postgres
+  volumes:
+    - ./dags:/opt/airflow/dags
+    - ./src:/opt/airflow/obrail/src
+    - ./data:/opt/airflow/obrail/data
+    - airflow_logs:/opt/airflow/logs
+  depends_on:
+    airflow_db:
+      condition: service_healthy
+
+services:
+
+  # ─── Base de données PostgreSQL ObRail ─────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: obrail_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: obrail_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d obrail_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Base de données PostgreSQL Airflow (metadonnees) ──────────
+  airflow_db:
+    image: postgres:16-alpine
+    container_name: obrail_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Airflow — Initialisation (run once) ───────────────────────
+  airflow_init:
+    <<: *airflow-common
+    container_name: obrail_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install psycopg2-binary pandas sqlalchemy python-dotenv requests &&
+        airflow db migrate &&
+        airflow users create \
+          --username admin \
+          --password admin \
+          --firstname ObRail \
+          --lastname Admin \
+          --role Admin \
+          --email admin@obrail.eu
+    restart: "no"
+
+  # ─── Airflow Webserver (interface graphique) ────────────────────
+  airflow_webserver:
+    <<: *airflow-common
+    container_name: obrail_airflow_webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+
+  # ─── Airflow Scheduler (planificateur) ─────────────────────────
+  airflow_scheduler:
+    <<: *airflow-common
+    container_name: obrail_airflow_scheduler
+    restart: unless-stopped
+    command: scheduler
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+
+  # ─── API FastAPI ───────────────────────────────────────────────
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: obrail_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Dashboard Streamlit ───────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: obrail_dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      API_URL: http://api:8000
+    volumes:
+      - ./data:/app/data
+    ports:
+      - "8501:8501"
+
+volumes:
+  postgres_data:
+  airflow_db_data:
+  airflow_logs:

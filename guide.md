@@ -4,7 +4,7 @@
 
 - Docker Desktop installé et lancé
 - Git
-- 5 GB d'espace disque libre (données volumineuses)
+- 5 GB d'espace disque libre
 
 ---
 
@@ -13,138 +13,146 @@
 ```
 obrail/
 ├── src/
-│   ├── extract.py       # Téléchargement
-│   ├── transform.py     # Nettoyage et transformation
-│   ├── load.py          # Chargement PostgreSQL
-│   └── pipeline.py      # Orchestrateur ETL
+│   ├── extract.py        # Téléchargement GTFS
+│   ├── transform.py      # Nettoyage et transformation
+│   ├── load.py           # Chargement PostgreSQL normalisé
+│   └── pipeline.py       # Orchestrateur ETL
 ├── api/
-│   └── main.py          # API REST FastAPI
+│   └── main.py           # API REST FastAPI (10 endpoints)
 ├── dashboard/
-│   └── app.py           # Dashboard Streamlit
+│   └── app.py            # Dashboard Streamlit (6 pages)
+├── dags/
+│   └── obrail_etl_dag.py # DAG Airflow — planification automatique
 ├── data/
-│   ├── raw/             # Données brutes (GTFS téléchargés)
-│   ├── transformed/     # CSV nettoyé + stats.json
-│   └── processed/       # Parquet pour le dashboard
-├── docker-compose.yml
+│   ├── raw/              # Données brutes GTFS téléchargées
+│   ├── transformed/      # CSV nettoyé
+│   └── processed/        # Parquet fallback dashboard
+├── docker-compose.yml            # Sans Airflow (manuel)
+├── docker-compose-airflow.yml    # Avec Airflow (automatisé)
 ├── Dockerfile.etl
 ├── Dockerfile.api
 ├── Dockerfile.dashboard
-├── requirements.txt     # Requirements
-├── init.sql             # Schéma PostgreSQL
-└── .env                 # Variables d'environnement
+├── requirements.txt
+├── init.sql              # Schéma PostgreSQL normalisé
+└── .env                  # Variables d'environnement
 ```
 
 ---
 
 ## 1. Créer le fichier .env
 
-Dans le dossier du projet, créer un fichier `.env` :
-
-**Windows PowerShell :**
 ```powershell
 [System.IO.File]::WriteAllText("$PWD\.env",
 "DB_HOST=db`nDB_PORT=5432`nDB_NAME=obrail_db`nDB_USER=postgres`nDB_PASSWORD=postgres`n",
 [System.Text.Encoding]::UTF8)
 ```
 
-**Mac / Linux :**
-```bash
-cat > .env << EOF
-DB_HOST=db
-DB_PORT=5432
-DB_NAME=obrail_db
-DB_USER=""
-DB_PASSWORD=""
-EOF
-```
-
 ---
 
-## 2. Lancer la stack Docker
+## 2. VERSION MANUELLE — Sans Airflow
 
-```bash
-# Construire et démarrer tous les services
+Lance le pipeline manuellement quand tu veux.
+
+```powershell
+# Démarrer les services
 docker compose up -d --build
-```
 
-Cela démarre 4 conteneurs :
-| Conteneur       | Rôle                        | Port  |
-|-----------------|-----------------------------|-------|
-| obrail_db       | Base de données PostgreSQL  | 5432  |
-| obrail_etl      | Pipeline ETL (one-shot)     | —     |
-| obrail_api      | API REST FastAPI            | 8000  |
-| obrail_dashboard| Dashboard Streamlit         | 8501  |
-
-Vérifier que tout tourne :
-```bash
+# Vérifier
 docker compose ps
+
+# Lancer le pipeline ETL (~52 secondes)
+docker compose run etl
+
+# Accès
+# Dashboard  → http://localhost:8501
+# API        → http://localhost:8000
+# Swagger    → http://localhost:8000/docs
 ```
 
 ---
 
-## 3. Lancer le pipeline ETL
+## 3. VERSION AUTOMATISÉE — Avec Airflow
 
-**Pipeline complet** (Extract + Transform + Load) :
-```bash
-docker compose run etl
+Le pipeline se lance **automatiquement tous les jours à 2h du matin**.
+
+```powershell
+# Démarrer tous les services + Airflow
+docker compose -f docker-compose-airflow.yml up -d
+
+# Attendre 2-3 minutes puis vérifier
+docker compose -f docker-compose-airflow.yml ps
+
+# Accès
+# Dashboard     → http://localhost:8501
+# API           → http://localhost:8000
+# Airflow UI    → http://localhost:8080  (admin / admin)
 ```
 
-Durée estimée : **10 à 20 minutes** selon la connexion internet
-(Deutsche Bahn Regional = fichier volumineux ~800 MB)
+### Activer le DAG dans Airflow
 
-**Étapes individuelles si besoin :**
-```bash
-# Extraction uniquement (téléchargement GTFS)
-docker compose run etl python src/pipeline.py --step extract
+1. Ouvrir http://localhost:8080
+2. Login : **admin** / **admin**
+3. Cliquer sur le toggle du DAG `obrail_etl_pipeline` pour l'activer
+4. Le pipeline se lancera automatiquement à 2h00 chaque nuit
 
-# Transformation uniquement (si données déjà téléchargées)
-docker compose run etl python src/pipeline.py --step transform
+### Lancer le pipeline manuellement depuis Airflow
 
-# Chargement uniquement (si dessertes.csv déjà généré)
-docker compose run etl python src/pipeline.py --step load
+Dans l'interface Airflow, cliquer sur **▶ Trigger DAG**.
+
+### Planification
+
+```python
+schedule_interval="0 2 * * *"   # Tous les jours à 2h du matin
 ```
+
+| Expression cron | Signification |
+|---|---|
+| `0 2 * * *` | Tous les jours à 2h00 |
+| `0 * * * *` | Toutes les heures |
+| `0 0 * * 1` | Tous les lundis à minuit |
 
 ---
 
 ## 4. Accéder aux services
 
-| Service       | URL                              |
-|---------------|----------------------------------|
-| Dashboard     | http://localhost:8501            |
-| API REST      | http://localhost:8000            |
-| Documentation | http://localhost:8000/docs       |
-| Santé API     | http://localhost:8000/health     |
+| Service | URL |
+|---|---|
+| Dashboard Streamlit | http://localhost:8501 |
+| API REST | http://localhost:8000 |
+| Swagger / Documentation | http://localhost:8000/docs |
+| Santé API | http://localhost:8000/health |
+| Airflow UI | http://localhost:8080 |
 
 ---
 
 ## 5. Exemples de requêtes API
 
 ```bash
-# Santé et nombre de dessertes en base
+# Santé et nombre de trains en base
 curl http://localhost:8000/health
 
-# Liste des opérateurs
+# Liste des opérateurs avec stats
 curl http://localhost:8000/operateurs
 
-# Recherche Paris → Lyon
-curl "http://localhost:8000/dessertes/search?depart=Paris&arrivee=Lyon"
+# Recherche par gare
+curl "http://localhost:8000/dessertes/search?gare=Paris&limit=10"
 
 # Trains de nuit SNCF
 curl "http://localhost:8000/dessertes/search?operateur=SNCF&type_service=Nuit"
 
 # Trajets entre 200 et 800 km
-curl "http://localhost:8000/dessertes/search?distance_min=200&distance_max=800"
+curl "http://localhost:8000/dessertes/search?dist_min=200&dist_max=800"
 
 # Statistiques globales
 curl http://localhost:8000/stats
 
-# CO2 par opérateur
+# CO2 par opérateur (base ADEME 2023)
 curl http://localhost:8000/stats/co2
 
-# Qualité des données
+# Qualité des données + etl_logs
 curl http://localhost:8000/stats/qualite
 
-# Couverture jour/nuit
+# Couverture Jour/Nuit par opérateur
 curl http://localhost:8000/stats/couverture
 ```
 
@@ -152,83 +160,48 @@ curl http://localhost:8000/stats/couverture
 
 ## 6. Arrêter et relancer
 
-```bash
-# Arrêter tous les conteneurs
-docker compose down
-
-# Arrêter et supprimer les données PostgreSQL (reset complet)
-docker compose down -v
-
-# Relancer sans rebuild
-docker compose up -d
-
-# Relancer avec rebuild (après modification du code)
-docker compose up -d --build
-```
-
----
-
-## 7. Mettre à jour les données
-
-Pour télécharger les dernières versions des GTFS :
-```bash
-# Relancer l'ETL complet
-docker compose run etl
-```
-
-Les données sont automatiquement écrasées et rechargées.
-
----
-
-## 8. Résolution des problèmes courants
-
-**Le dashboard affiche "Aucune donnée disponible"**
-```bash
-# Vérifier que l'ETL a bien tourné
-docker compose run etl python src/pipeline.py --step load
-```
-
-**Erreur de connexion à la base**
-```bash
-# Vérifier que PostgreSQL est healthy
-docker compose ps
-# Attendre que db soit "healthy" puis relancer
-```
-
-**Le fichier .env est mal encodé (Windows)**
 ```powershell
-[System.IO.File]::WriteAllText("$PWD\.env",
-"DB_HOST=db`nDB_PORT=5432`nDB_NAME=obrail_db`nDB_USER=postgres`nDB_PASSWORD=postgres`n",
-[System.Text.Encoding]::UTF8)
-```
+# Version manuelle
+docker compose down
+docker compose down -v         # Reset complet avec données
 
-**Rebuilder une image spécifique**
-```bash
-docker compose build --no-cache etl
-docker compose build --no-cache dashboard
-docker compose build --no-cache api
+# Version Airflow
+docker compose -f docker-compose-airflow.yml down
+docker compose -f docker-compose-airflow.yml down -v   # Reset complet
 ```
 
 ---
 
-## 9. Sources de données intégrées
+## 7. Résolution des problèmes
 
-| Source            | Format | Pays       | URL                                              |
-|-------------------|--------|------------|--------------------------------------------------|
-| SNCF TER          | GTFS   | France     | eu.ftp.opendatasoft.com/sncf/gtfs/               |
-| SNCF Intercités   | GTFS   | France     | eu.ftp.opendatasoft.com/sncf/gtfs/               |
-| Deutsche Bahn     | GTFS   | Allemagne  | download.gtfs.de/germany/fv_free/                |
-| DB Régional       | GTFS   | Allemagne  | download.gtfs.de/germany/rv_free/                |
-| SNCB              | GTFS   | Belgique   | gtfs.irail.be/nmbs/gtfs/                         |
-
-Licences : Open Data Commons ODbL — données librement réutilisables.
+| Problème | Solution |
+|---|---|
+| Dashboard "Aucune donnée" | `docker compose run etl` |
+| API retourne 503 | `docker compose logs api --tail=30` |
+| Airflow ne démarre pas | `docker compose -f docker-compose-airflow.yml logs airflow_init --tail=50` |
+| Base vide après ETL | `docker exec -it obrail_db psql -U postgres -d obrail_db -c 'SELECT COUNT(*) FROM train'` |
+| Rebuilder une image | `docker compose build --no-cache api` |
 
 ---
 
-## 10. Conformité RGPD
+## 8. Sources de données
 
-Ce projet ne traite **aucune donnée personnelle**.
-- Toutes les sources sont des données open data publiques
-- La table `etl_logs` assure la traçabilité des chargements
-- Les sources sont documentées et auditables
-- Licence ODbL respectée
+| Source | Format | Pays | URL |
+|---|---|---|---|
+| SNCF TER | GTFS | France | eu.ftp.opendatasoft.com/sncf/gtfs/ |
+| SNCF Intercités | GTFS | France | eu.ftp.opendatasoft.com/sncf/gtfs/ |
+| Deutsche Bahn (FV) | GTFS | Allemagne | download.gtfs.de/germany/fv_free/ |
+| DB Régional (RV) | GTFS | Allemagne | download.gtfs.de/germany/rv_free/ |
+| SNCB iRail | GTFS | Belgique | gtfs.irail.be/nmbs/gtfs/ |
+
+Licence : Open Data Commons ODbL — données librement réutilisables.
+
+---
+
+## 9. Conformité RGPD
+
+- Aucune donnée personnelle traitée
+- Sources open data publiques (ODbL)
+- Table `etl_logs` : traçabilité de chaque exécution
+- Credentials dans `.env`, jamais sur Git
+- API lecture seule (GET uniquement)
