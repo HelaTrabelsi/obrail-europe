@@ -1,5 +1,4 @@
 """
-ObRail Europe — DAG Airflow
 Pipeline ETL automatise toutes les heures
 """
 from datetime import datetime, timedelta
@@ -8,7 +7,7 @@ from airflow.operators.bash import BashOperator
 from airflow.operators.python import PythonOperator
 from airflow.utils.dates import days_ago
 
-# ── Configuration par defaut ──────────────────────────────────────
+#  Configuration par defaut 
 default_args = {
     "owner": "obrail",
     "depends_on_past": False,
@@ -18,7 +17,7 @@ default_args = {
     "retry_delay": timedelta(minutes=5),
 }
 
-# ── Definition du DAG ─────────────────────────────────────────────
+#  Definition du DAG
 with DAG(
     dag_id="obrail_etl_pipeline",
     description="Pipeline ETL ObRail — Extract GTFS + Transform + Load PostgreSQL",
@@ -29,7 +28,7 @@ with DAG(
     tags=["obrail", "etl", "ferroviaire"],
 ) as dag:
 
-    # ── Tache 1 : EXTRACT ─────────────────────────────────────────
+    # EXTRACT 
     extract = BashOperator(
         task_id="extract",
         bash_command="cd /opt/airflow/obrail && python src/pipeline.py --step extract",
@@ -43,7 +42,7 @@ with DAG(
         """,
     )
 
-    # ── Tache 2 : TRANSFORM ───────────────────────────────────────
+    #  TRANSFORM 
     transform = BashOperator(
         task_id="transform",
         bash_command="cd /opt/airflow/obrail && python src/pipeline.py --step transform",
@@ -58,7 +57,7 @@ with DAG(
         """,
     )
 
-    # ── Tache 3 : LOAD ────────────────────────────────────────────
+    #  LOAD 
     load = BashOperator(
         task_id="load",
         bash_command="cd /opt/airflow/obrail && python src/pipeline.py --step load",
@@ -73,7 +72,7 @@ with DAG(
         """,
     )
 
-    # ── Tache 4 : VERIFICATION ────────────────────────────────────
+    # VERIFICATION 
     def verifier_chargement(**context):
         """Verifie que le chargement s'est bien passe"""
         import psycopg2
@@ -91,10 +90,10 @@ with DAG(
         nb = cur.fetchone()[0]
         conn.close()
 
-        print(f"✅ Verification : {nb:,} trains en base")
+        print(f" Verification : {nb:,} trains en base")
 
         if nb < 1000:
-            raise ValueError(f"❌ Nombre de trains insuffisant : {nb}")
+            raise ValueError(f" Nombre de trains insuffisant : {nb}")
 
         return nb
 
@@ -104,6 +103,6 @@ with DAG(
         doc_md="Verifie que le nombre de trains en base est suffisant (> 1000).",
     )
 
-    # ── Ordre d'execution ─────────────────────────────────────────
+    # Ordre d'execution 
     # extract → transform → load → verifier
     extract >> transform >> load >> verifier

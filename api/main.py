@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from typing import Optional
+from prometheus_fastapi_instrumentator import Instrumentator
 import os
 
 app = FastAPI(
@@ -14,6 +15,9 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
+# Monitoring Prometheus 
+Instrumentator().instrument(app).expose(app)
 
 DB_URL = (
     f"postgresql://{os.getenv('DB_USER','postgres')}:{os.getenv('DB_PASSWORD','postgres')}"
@@ -31,7 +35,7 @@ def db_ok():
     except Exception:
         return False
 
-# ── Jointure de base ─────────────────────────────────────────────
+# Jointure de base
 BASE_QUERY = """
     SELECT
         t.id_train,
@@ -52,7 +56,7 @@ BASE_QUERY = """
     JOIN gare      g  ON g.id_gare      = tr.id_gare
 """
 
-# ── /health ──────────────────────────────────────────────────────
+# /health 
 @app.get("/health", tags=["Sante"])
 def health():
     if not db_ok():
@@ -64,7 +68,7 @@ def health():
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
 
-# ── /dessertes ───────────────────────────────────────────────────
+# /dessertes 
 @app.get("/dessertes", tags=["Dessertes"])
 def get_dessertes(skip: int = 0, limit: int = Query(default=100, le=500)):
     try:
@@ -75,7 +79,7 @@ def get_dessertes(skip: int = 0, limit: int = Query(default=100, le=500)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── /dessertes/search ────────────────────────────────────────────
+#  /dessertes/search
 @app.get("/dessertes/search", tags=["Dessertes"])
 def search_dessertes(
     gare:         Optional[str] = None,
@@ -102,7 +106,7 @@ def search_dessertes(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# ── /dessertes/{id} ──────────────────────────────────────────────
+#  /dessertes/{id} 
 @app.get("/dessertes/{id_train}", tags=["Dessertes"])
 def get_desserte(id_train: int):
     try:
@@ -113,7 +117,7 @@ def get_desserte(id_train: int):
     except HTTPException: raise
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /operateurs ──────────────────────────────────────────────────
+#  /operateurs 
 @app.get("/operateurs", tags=["Referentiels"])
 def get_operateurs():
     try:
@@ -131,7 +135,7 @@ def get_operateurs():
         return [dict(r) for r in rows]
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /gares ───────────────────────────────────────────────────────
+#  /gares 
 @app.get("/gares", tags=["Referentiels"])
 def get_gares(nom: Optional[str] = None, limit: int = 100):
     try:
@@ -145,7 +149,7 @@ def get_gares(nom: Optional[str] = None, limit: int = 100):
         return [dict(r) for r in rows]
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /stats ───────────────────────────────────────────────────────
+#  /stats 
 @app.get("/stats", tags=["Statistiques"])
 def get_stats():
     try:
@@ -165,7 +169,7 @@ def get_stats():
         }
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /stats/co2 ───────────────────────────────────────────────────
+#  /stats/co2 
 @app.get("/stats/co2", tags=["Statistiques"])
 def get_stats_co2():
     try:
@@ -183,7 +187,7 @@ def get_stats_co2():
         return [dict(r) for r in rows]
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /stats/couverture ────────────────────────────────────────────
+# /stats/couverture 
 @app.get("/stats/couverture", tags=["Statistiques"])
 def get_stats_couverture():
     try:
@@ -203,7 +207,7 @@ def get_stats_couverture():
         return [dict(r) for r in rows]
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
 
-# ── /stats/qualite ───────────────────────────────────────────────
+#  /stats/qualite 
 @app.get("/stats/qualite", tags=["Statistiques"])
 def get_stats_qualite():
     try:

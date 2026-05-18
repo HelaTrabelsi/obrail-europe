@@ -1,0 +1,78 @@
+name: ObRail Europe — CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # Tests unitaires et d'intégration
+
+  tests:
+    name: Tests automatises
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installation Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Installation des dependances
+        run: pip install -r requirements.txt pytest pytest-cov httpx
+
+      - name: Execution des tests unitaires
+        run: pytest tests/ -v --tb=short --cov=api --cov-report=term-missing
+
+      - name: Rapport de couverture
+        run: pytest tests/ --cov=api --cov-report=xml
+
+  # Build des images Docker
+  build:
+    name: Build Docker images
+    runs-on: ubuntu-latest
+    needs: tests 
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Configuration Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image API
+        run: docker build -f Dockerfile.api -t obrail-api:latest .
+
+      - name: Build image Dashboard
+        run: docker build -f Dockerfile.dashboard -t obrail-dashboard:latest .
+
+      - name: Build image ETL
+        run: docker build -f Dockerfile.etl -t obrail-etl:latest .
+
+  #  Validation Docker Compose
+  integration:
+    name: Test integration Docker Compose
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Demarrage des services
+        run: |
+          docker compose up -d db api
+          sleep 20
+
+      - name: Verification sante API
+        run: |
+          curl -f http://localhost:8000/health || exit 1
+
+      - name: Arret des services
+        run: docker compose down

@@ -18,5 +18,8 @@ streamlit==1.35.0
 plotly==5.22.0
 statsmodels==0.14.2
 
+# --- Monitoring ---
+prometheus-fastapi-instrumentator==5.0.0
+
 # --- Utilitaires ---
 python-dotenv==1.0.1
