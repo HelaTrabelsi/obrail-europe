@@ -1,21 +1,32 @@
-﻿FROM python:3.11-slim
- 
-WORKDIR /app
- 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev curl && rm -rf /var/lib/apt/lists/*
- 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
- 
-COPY dashboard/ ./dashboard/
- 
+# Utiliser l'image Node.js officielle (Alpine pour la légèreté)
+FROM node:18-alpine AS base
+RUN corepack enable && corepack prepare pnpm@latest --activate
 
- 
-EXPOSE 8501
-CMD ["streamlit", "run", "dashboard/app.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--browser.gatherUsageStats=false"]
- 
+# Étape 1 : Installation des dépendances
+FROM base AS deps
+WORKDIR /app
+COPY dashboard/package.json dashboard/pnpm-lock.yaml* ./
+RUN pnpm install --frozen-lockfile
+
+# Étape 2 : Build de l'application Next.js
+FROM base AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY dashboard/ ./
+ENV NEXT_PUBLIC_API_URL=http://localhost:8000
+RUN pnpm run build
+
+# Étape 3 : Serveur de production léger
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=builder /app/public ./public
+COPY --from=builder /app/.next ./.next
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+ENV PORT=3000
+
+CMD ["pnpm", "start"]

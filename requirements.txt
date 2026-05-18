@@ -13,11 +13,6 @@ numpy==1.26.4
 requests==2.31.0
 pyarrow==16.0.0
 
-# --- Dashboard ---
-streamlit==1.35.0
-plotly==5.22.0
-statsmodels==0.14.2
-
 # --- Monitoring ---
 prometheus-fastapi-instrumentator==5.0.0
 

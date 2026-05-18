@@ -1,11 +1,5 @@
 version: "3.9"
 
-# ================================================================
-# ObRail Europe — Docker Compose
-# Services : db + airflow + api + dashboard
-# Airflow planifie le pipeline ETL toutes les heures
-# ================================================================
-
 x-airflow-common: &airflow-common
   image: apache/airflow:2.8.0
   environment:
@@ -14,7 +8,6 @@ x-airflow-common: &airflow-common
     AIRFLOW__CORE__FERNET_KEY: ""
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    # Variables pour que le DAG puisse acceder a PostgreSQL obrail
     DB_HOST: db
     DB_PORT: 5432
     DB_NAME: obrail_db
@@ -31,7 +24,6 @@ x-airflow-common: &airflow-common
 
 services:
 
-  # ─── Base de données PostgreSQL ObRail ─────────────────────────
   db:
     image: postgres:16-alpine
     container_name: obrail_db
@@ -51,7 +43,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Base de données PostgreSQL Airflow (metadonnees) ──────────
   airflow_db:
     image: postgres:16-alpine
     container_name: obrail_airflow_db
@@ -68,7 +59,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Airflow — Initialisation (run once) ───────────────────────
   airflow_init:
     <<: *airflow-common
     container_name: obrail_airflow_init
@@ -87,7 +77,6 @@ services:
           --email admin@obrail.eu
     restart: "no"
 
-  # ─── Airflow Webserver (interface graphique) ────────────────────
   airflow_webserver:
     <<: *airflow-common
     container_name: obrail_airflow_webserver
@@ -104,7 +93,6 @@ services:
       airflow_init:
         condition: service_completed_successfully
 
-  # ─── Airflow Scheduler (planificateur) ─────────────────────────
   airflow_scheduler:
     <<: *airflow-common
     container_name: obrail_airflow_scheduler
@@ -114,7 +102,6 @@ services:
       airflow_init:
         condition: service_completed_successfully
 
-  # ─── API FastAPI ───────────────────────────────────────────────
   api:
     build:
       context: .
@@ -138,7 +125,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── Dashboard Streamlit ───────────────────────────────────────
   dashboard:
     build:
       context: .
@@ -146,19 +132,11 @@ services:
     container_name: obrail_dashboard
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      - api
     environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: obrail_db
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      API_URL: http://api:8000
-    volumes:
-      - ./data:/app/data
+      NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
-      - "8501:8501"
+      - "3000:3000"
 
 volumes:
   postgres_data:

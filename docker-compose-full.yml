@@ -1,10 +1,5 @@
 version: "3.9"
 
-# ================================================================
-# ObRail Europe — Docker Compose COMPLET
-# Bloc E6.3 — Avec monitoring Grafana + Prometheus + Airflow
-# ================================================================
-
 x-airflow-common: &airflow-common
   image: apache/airflow:2.8.0
   environment:
@@ -28,7 +23,6 @@ x-airflow-common: &airflow-common
 
 services:
 
-  # ─── PostgreSQL ObRail ─────────────────────────────────────────
   db:
     image: postgres:16-alpine
     container_name: obrail_db
@@ -48,7 +42,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── PostgreSQL Airflow ────────────────────────────────────────
   airflow_db:
     image: postgres:16-alpine
     container_name: obrail_airflow_db
@@ -65,7 +58,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Airflow Init ──────────────────────────────────────────────
   airflow_init:
     <<: *airflow-common
     container_name: obrail_airflow_init
@@ -76,12 +68,14 @@ services:
         pip install psycopg2-binary pandas sqlalchemy python-dotenv requests &&
         airflow db migrate &&
         airflow users create \
-          --username admin --password admin \
-          --firstname ObRail --lastname Admin \
-          --role Admin --email admin@obrail.eu
+          --username admin \
+          --password admin \
+          --firstname ObRail \
+          --lastname Admin \
+          --role Admin \
+          --email admin@obrail.eu
     restart: "no"
 
-  # ─── Airflow Webserver ─────────────────────────────────────────
   airflow_webserver:
     <<: *airflow-common
     container_name: obrail_airflow_webserver
@@ -89,11 +83,15 @@ services:
     ports:
       - "8080:8080"
     command: webserver
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     depends_on:
       airflow_init:
         condition: service_completed_successfully
 
-  # ─── Airflow Scheduler ─────────────────────────────────────────
   airflow_scheduler:
     <<: *airflow-common
     container_name: obrail_airflow_scheduler
@@ -103,7 +101,6 @@ services:
       airflow_init:
         condition: service_completed_successfully
 
-  # ─── API FastAPI ───────────────────────────────────────────────
   api:
     build:
       context: .
@@ -127,7 +124,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── Dashboard Streamlit ───────────────────────────────────────
   dashboard:
     build:
       context: .
@@ -135,21 +131,12 @@ services:
     container_name: obrail_dashboard
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
+      - api
     environment:
-      DB_HOST: db
-      DB_PORT: 5432
-      DB_NAME: obrail_db
-      DB_USER: postgres
-      DB_PASSWORD: postgres
-      API_URL: http://api:8000
-    volumes:
-      - ./data:/app/data
+      NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
-      - "8501:8501"
+      - "3000:3000"
 
-  # ─── Prometheus — collecte des metriques ───────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: obrail_prometheus
@@ -164,25 +151,20 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/etc/prometheus/console_libraries'
 
-  # ─── Grafana — visualisation des metriques ─────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: obrail_grafana
     restart: unless-stopped
     depends_on:
       - prometheus
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_ALLOW_SIGN_UP: "false"
-    volumes:
-      - grafana_data:/var/lib/grafana
     ports:
-      - "3000:3000"
+      # CHANGEMENT MAJEUR ICI :
+      # Grafana utilise par défaut le port 3000, mais React utilise aussi le 3000.
+      # On mappe donc l'accès extérieur de Grafana sur 3001 pour éviter le conflit.
+      - "3001:3000"
 
 volumes:
   postgres_data:
   airflow_db_data:
   airflow_logs:
   prometheus_data:
-  grafana_data:
