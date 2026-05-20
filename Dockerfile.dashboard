@@ -1,32 +1,30 @@
-# Utiliser l'image Node.js officielle (Alpine pour la légèreté)
-FROM node:18-alpine AS base
+﻿FROM node:20-alpine AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Étape 1 : Installation des dépendances
+
 FROM base AS deps
 WORKDIR /app
-COPY dashboard/package.json dashboard/pnpm-lock.yaml* ./
-RUN pnpm install --frozen-lockfile
+COPY frontend/package.json frontend/package-lock.json* ./
+RUN npm install
 
-# Étape 2 : Build de l'application Next.js
+
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY dashboard/ ./
-ENV NEXT_PUBLIC_API_URL=http://localhost:8000
-RUN pnpm run build
+COPY frontend/ ./
+ENV NEXT_PUBLIC_API_URL=http://api:8000/
+RUN npm run build
 
-# Étape 3 : Serveur de production léger
-FROM base AS runner
+
+FROM node:20-alpine AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next ./.next
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
 
 EXPOSE 3000
 ENV PORT=3000
 
-CMD ["pnpm", "start"]
+CMD ["node", "server.js"]
