@@ -49,8 +49,8 @@ jobs:
       - name: Build image API
         run: docker build -f Dockerfile.api -t obrail-api:latest .
 
-      - name: Build image Dashboard
-        run: docker build -f Dockerfile.dashboard -t obrail-dashboard:latest .
+      - name: Build image Frontend
+        run: docker build -f Dockerfile.frontend -t obrail-frontend:latest .
 
       - name: Build image ETL
         run: docker build -f Dockerfile.etl -t obrail-etl:latest .
