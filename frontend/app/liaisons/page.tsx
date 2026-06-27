@@ -22,7 +22,7 @@ export default function LiaisonsPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 500 }), getOperateursFromAPI()])
+        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 50 }), getOperateursFromAPI()])
         setTrains(t); setOperators(o); setApiStatus(true)
       } catch (e) { setApiStatus(false) } finally { setLoading(false) }
     }
@@ -113,3 +113,5 @@ export default function LiaisonsPage() {
     </div>
   )
 }
+
+

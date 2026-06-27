@@ -1,11 +1,5 @@
-/**
- * ObRail Europe — API Client
- * Remplace mock-data par les vraies donnees FastAPI
- */
-
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
-// ── Types ──────────────────────────────────────────────────────
 export interface Train {
   id_train: number
   operateur: string
@@ -18,7 +12,6 @@ export interface Train {
   distance_km: number
   emission_co2_gkm: number
   source_donnee: string
-  // Champs calcules
   operator?: string
   origin_station?: string
   destination_station?: string
@@ -74,7 +67,6 @@ export interface HealthStatus {
   nb_trains: number
 }
 
-// ── Fetch helper ───────────────────────────────────────────────
 async function apiFetch<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(`${API_URL}${path}`)
   if (params) {
@@ -82,14 +74,11 @@ async function apiFetch<T>(path: string, params?: Record<string, string | number
       if (v !== undefined && v !== null) url.searchParams.set(k, String(v))
     })
   }
-  const res = await fetch(url.toString(), {
-    next: { revalidate: 60 }, // Cache 60s
-  })
+  const res = await fetch(url.toString(), { cache: 'no-store' })
   if (!res.ok) throw new Error(`API error ${res.status}: ${path}`)
   return res.json()
 }
 
-// ── Normalisation des trains ────────────────────────────────────
 function normalizeTrains(trains: Train[]): Train[] {
   return trains.map(t => ({
     ...t,
@@ -101,25 +90,35 @@ function normalizeTrains(trains: Train[]): Train[] {
   }))
 }
 
-// ── Endpoints ──────────────────────────────────────────────────
-
 export async function getHealth(): Promise<HealthStatus> {
   return apiFetch<HealthStatus>('/health')
 }
 
+// Limite par défaut à 50 pour éviter de surcharger le navigateur
 export async function getTrainsFromAPI(params?: {
   gare?: string
+  gare_depart?: string
+  gare_arrivee?: string
   operateur?: string
   type_service?: string
   dist_min?: number
   dist_max?: number
   limit?: number
 }): Promise<Train[]> {
+  const { gare_depart, gare_arrivee, ...rest } = params || {}
+  // Si gare_depart ou gare_arrivee → utilise le champ gare de l'API
+  const gare = gare_depart || gare_arrivee || rest.gare
   const trains = await apiFetch<Train[]>('/dessertes/search', {
-    limit: 500,
-    ...params,
+    limit: 50,
+    ...rest,
+    ...(gare ? { gare } : {}),
   })
   return normalizeTrains(trains)
+}
+
+// Récupère la liste des gares disponibles
+export async function getGaresFromAPI(nom?: string): Promise<{ id_gare: number; nom: string; pays: string }[]> {
+  return apiFetch('/gares', nom ? { nom } : {})
 }
 
 export async function getOperateursFromAPI(): Promise<Operateur[]> {
@@ -140,51 +139,4 @@ export async function getStatsQualiteFromAPI(): Promise<StatsQualite> {
 
 export async function getStatsCouvertureFromAPI() {
   return apiFetch('/stats/couverture')
-}
-
-// ── Compatibilite mock-data (pour ne pas casser les pages) ──────
-// Ces fonctions retournent des donnees vides si l'API est indisponible
-
-let _trainsCache: Train[] | null = null
-let _opCache: Operateur[] | null = null
-let _statsCache: any = null
-
-export function getTrains(): Train[] {
-  return _trainsCache || []
-}
-
-export function getOperators(): Operateur[] {
-  return _opCache || []
-}
-
-export function getStats() {
-  return _statsCache || {
-    avant_doublons: 186902,
-    apres_doublons: 127740,
-    doublons_supprimes: 59162,
-    sans_horaires_supprimes: 0,
-  }
-}
-
-export async function loadAllData() {
-  try {
-    const [trains, ops, stats] = await Promise.all([
-      getTrainsFromAPI({ limit: 500 }),
-      getOperateursFromAPI(),
-      getStatsFromAPI(),
-    ])
-    _trainsCache = trains
-    _opCache = ops
-    _statsCache = {
-      avant_doublons: 186902,
-      apres_doublons: stats.nb_trains,
-      doublons_supprimes: 59162,
-      sans_horaires_supprimes: 0,
-      ...stats,
-    }
-    return { trains, operators: ops, stats }
-  } catch (e) {
-    console.error('API indisponible — mode demo:', e)
-    return null
-  }
 }

@@ -18,7 +18,7 @@ export default function CO2Page() {
   useEffect(() => {
     async function load() {
       try {
-        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 500 }), getOperateursFromAPI()])
+        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 50 }), getOperateursFromAPI()])
         setTrains(t); setOperators(o); setApiStatus(true)
       } catch (e) { setApiStatus(false) } finally { setLoading(false) }
     }
@@ -101,3 +101,5 @@ export default function CO2Page() {
     </div>
   )
 }
+
+

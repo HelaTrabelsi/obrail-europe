@@ -18,7 +18,7 @@ export default function StatistiquesPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 500 }), getOperateursFromAPI()])
+        const [t, o] = await Promise.all([getTrainsFromAPI({ limit: 50 }), getOperateursFromAPI()])
         setTrains(t); setOperators(o); setApiStatus(true)
       } catch (e) { setApiStatus(false) } finally { setLoading(false) }
     }
@@ -30,7 +30,7 @@ export default function StatistiquesPage() {
     const nbNuit = trains.filter(t => t.type_service === 'Nuit').length
     const nbJour = trains.filter(t => t.type_service === 'Jour').length
     const distances = trains.map(t => t.distance_km)
-    return { total: trains.length, nbNuit, nbJour, avgDistance: distances.reduce((a,b)=>a+b,0)/distances.length, maxDistance: Math.max(...distances) }
+    return { total: trains.length, nbNuit, nbJour, avgDistance: distances.reduce((a,b)=>a+b,0)/distances.length, maxDistance: distances.length > 0 ? Math.max(...distances) : 0 }
   }, [trains])
 
   const topStations = useMemo(() => {
@@ -89,3 +89,5 @@ export default function StatistiquesPage() {
     </div>
   )
 }
+
+

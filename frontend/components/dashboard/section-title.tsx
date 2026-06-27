@@ -16,3 +16,5 @@ export function SectionTitle({ children, className }: SectionTitleProps) {
     </div>
   )
 }
+
+

@@ -19,7 +19,7 @@ export default function QualitePage() {
   useEffect(() => {
     async function load() {
       try {
-        const [t, q] = await Promise.all([getTrainsFromAPI({ limit: 500 }), getStatsQualiteFromAPI()])
+        const [t, q] = await Promise.all([getTrainsFromAPI({ limit: 50 }), getStatsQualiteFromAPI()])
         setTrains(t); setQualite(q); setApiStatus(true)
       } catch (e) { setApiStatus(false) } finally { setLoading(false) }
     }
@@ -94,3 +94,5 @@ export default function QualitePage() {
     </div>
   )
 }
+
+

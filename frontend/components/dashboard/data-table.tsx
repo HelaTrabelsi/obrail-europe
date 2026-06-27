@@ -51,3 +51,5 @@ export function DataTable({ columns, data, className, maxHeight = '360px' }: Dat
     </div>
   )
 }
+
+

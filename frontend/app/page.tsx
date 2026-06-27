@@ -26,7 +26,7 @@ export default function HomePage() {
         setApiStatus(health.status === 'ok')
 
         const [t, o, s] = await Promise.all([
-          getTrainsFromAPI({ limit: 500 }),
+          getTrainsFromAPI({ limit: 50 }),
           getOperateursFromAPI(),
           getStatsFromAPI(),
         ])
@@ -143,3 +143,5 @@ export default function HomePage() {
     </div>
   )
 }
+
+

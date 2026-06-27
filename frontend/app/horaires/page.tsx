@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { TopNav } from '@/components/dashboard/top-nav'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { SectionTitle } from '@/components/dashboard/section-title'
@@ -8,38 +8,51 @@ import { StatRow } from '@/components/dashboard/source-card'
 import { DataTable } from '@/components/dashboard/data-table'
 import { BarChartComponent } from '@/components/dashboard/charts'
 import {
-  getTrainsFromAPI, getOperateursFromAPI,
+  getTrainsFromAPI, getOperateursFromAPI, getGaresFromAPI,
   type Train, type Operateur
 } from '@/lib/api-client'
 import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Slider } from '@/components/ui/slider'
 import { Button } from '@/components/ui/button'
-import { Download } from 'lucide-react'
+import { Download, Search, Train as TrainIcon, X } from 'lucide-react'
 
 export default function HorairesPage() {
   const [trains, setTrains] = useState<Train[]>([])
   const [operators, setOperators] = useState<Operateur[]>([])
   const [loading, setLoading] = useState(true)
+  const [searching, setSearching] = useState(false)
   const [apiStatus, setApiStatus] = useState(false)
 
-  const [selectedOperator, setSelectedOperator] = useState<string>('all')
-  const [selectedService, setSelectedService] = useState<string>('all')
-  const [selectedLine, setSelectedLine] = useState<string>('all')
-  const [distanceRange, setDistanceRange] = useState<number[]>([0, 917])
+  // Filtres simples
+  const [selectedOperator, setSelectedOperator] = useState('all')
+  const [selectedService, setSelectedService] = useState('all')
+  const [selectedLine, setSelectedLine] = useState('all')
+  const [distanceRange, setDistanceRange] = useState([0, 917])
 
+  // Recherche gare par texte
+  const [gareDepart, setGareDepart] = useState('')
+  const [gareArrivee, setGareArrivee] = useState('')
+  const [garesDepart, setGaresDepart] = useState<{ id_gare: number; nom: string; pays: string }[]>([])
+  const [garesArrivee, setGaresArrivee] = useState<{ id_gare: number; nom: string; pays: string }[]>([])
+  const [showDepartList, setShowDepartList] = useState(false)
+  const [showArriveeList, setShowArriveeList] = useState(false)
+  const [selectedDepart, setSelectedDepart] = useState('')
+  const [selectedArrivee, setSelectedArrivee] = useState('')
+
+  // Chargement initial
   useEffect(() => {
     async function load() {
       try {
         const [t, o] = await Promise.all([
-          getTrainsFromAPI({ limit: 500 }),
+          getTrainsFromAPI({ limit: 50 }),
           getOperateursFromAPI(),
         ])
         setTrains(t)
         setOperators(o)
         setApiStatus(true)
       } catch (e) {
-        console.error('API indisponible:', e)
         setApiStatus(false)
       } finally {
         setLoading(false)
@@ -48,22 +61,62 @@ export default function HorairesPage() {
     load()
   }, [])
 
+  // Recherche gares départ par texte
+  useEffect(() => {
+    if (gareDepart.length < 2) { setGaresDepart([]); return }
+    const timer = setTimeout(async () => {
+      try {
+        const g = await getGaresFromAPI(gareDepart)
+        setGaresDepart(g.slice(0, 15))
+        setShowDepartList(true)
+      } catch {}
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [gareDepart])
+
+  // Recherche gares arrivée par texte
+  useEffect(() => {
+    if (gareArrivee.length < 2) { setGaresArrivee([]); return }
+    const timer = setTimeout(async () => {
+      try {
+        const g = await getGaresFromAPI(gareArrivee)
+        setGaresArrivee(g.slice(0, 15))
+        setShowArriveeList(true)
+      } catch {}
+    }, 300)
+    return () => clearTimeout(timer)
+  }, [gareArrivee])
+
+  const handleSearch = async () => {
+    setSearching(true)
+    try {
+      const params: any = { limit: 50 }
+      if (selectedOperator !== 'all') params.operateur = selectedOperator
+      if (selectedService !== 'all') params.type_service = selectedService
+      if (selectedDepart) params.gare = selectedDepart
+      if (distanceRange[0] > 0) params.dist_min = distanceRange[0]
+      if (distanceRange[1] < 917) params.dist_max = distanceRange[1]
+      const t = await getTrainsFromAPI(params)
+      setTrains(t)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSearching(false)
+    }
+  }
+
   const filteredTrains = useMemo(() => {
     return trains.filter(t => {
-      if (selectedOperator !== 'all' && t.operator !== selectedOperator) return false
-      if (selectedService !== 'all' && t.type_service !== selectedService) return false
       if (selectedLine !== 'all' && t.type_ligne !== selectedLine) return false
-      if (t.distance_km < distanceRange[0] || t.distance_km > distanceRange[1]) return false
       return true
     })
-  }, [trains, selectedOperator, selectedService, selectedLine, distanceRange])
+  }, [trains, selectedLine])
 
   const stats = useMemo(() => ({
     count: filteredTrains.length,
     totalDistance: filteredTrains.reduce((acc, t) => acc + t.distance_km, 0),
     avgDistance: filteredTrains.length > 0
-      ? filteredTrains.reduce((acc, t) => acc + t.distance_km, 0) / filteredTrains.length
-      : 0,
+      ? filteredTrains.reduce((acc, t) => acc + t.distance_km, 0) / filteredTrains.length : 0,
     totalCO2: filteredTrains.reduce((acc, t) => acc + (t.co2_emission_kg || 0), 0),
   }), [filteredTrains])
 
@@ -74,16 +127,16 @@ export default function HorairesPage() {
       hours[h] = (hours[h] || 0) + 1
     })
     return Array.from({ length: 24 }, (_, i) => ({
-      name: i.toString().padStart(2, '0'),
+      name: i.toString().padStart(2, '0') + 'h',
       value: hours[i] || 0,
     }))
   }, [filteredTrains])
 
   const tableColumns = [
-    { key: 'operator', label: 'Operateur' },
+    { key: 'operator', label: 'Opérateur' },
     { key: 'origin_station', label: 'Gare' },
-    { key: 'heure_depart', label: 'H. depart' },
-    { key: 'heure_arrivee', label: 'H. arrivee' },
+    { key: 'heure_depart', label: 'H. départ' },
+    { key: 'heure_arrivee', label: 'H. arrivée' },
     { key: 'distance_km', label: 'Dist. km', align: 'right' as const },
     { key: 'co2_emission_kg', label: 'CO2 kg', align: 'right' as const },
     { key: 'type_service', label: 'Type' },
@@ -110,13 +163,11 @@ export default function HorairesPage() {
     a.click()
   }
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="text-muted-foreground text-sm">Chargement des donnees...</div>
-      </div>
-    )
-  }
+  if (loading) return (
+    <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="text-muted-foreground text-sm">Chargement des données...</div>
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-background">
@@ -126,12 +177,128 @@ export default function HorairesPage() {
           eyebrow="Recherche"
           title="Horaires"
           titleHighlight="& trains"
-          subtitle="Filtrez par operateur, type de service ou distance"
+          subtitle="Recherchez par gare de départ, opérateur, type de service ou distance"
         />
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        {/* ── RECHERCHE GARE ── */}
+        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <TrainIcon className="h-4 w-4 text-primary" />
+            <span className="text-sm font-bold text-primary uppercase tracking-wide">
+              Recherche de trajet
+            </span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+            {/* Gare départ */}
+            <div className="space-y-2 relative">
+              <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
+                Gare de départ
+              </Label>
+              <div className="relative">
+                <Input
+                  value={gareDepart}
+                  onChange={e => { setGareDepart(e.target.value); setSelectedDepart('') }}
+                  onFocus={() => garesDepart.length > 0 && setShowDepartList(true)}
+                  placeholder="Tapez une ville... (ex: Paris)"
+                  className="bg-card border-border/50"
+                />
+                {selectedDepart && (
+                  <button
+                    onClick={() => { setGareDepart(''); setSelectedDepart(''); setShowDepartList(false) }}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Effacer gare départ"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              {showDepartList && garesDepart.length > 0 && (
+                <div className="absolute z-50 w-full bg-card border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                  {garesDepart.map(g => (
+                    <button
+                      key={g.id_gare}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex justify-between"
+                      onClick={() => {
+                        setGareDepart(g.nom)
+                        setSelectedDepart(g.nom)
+                        setShowDepartList(false)
+                      }}
+                    >
+                      <span>{g.nom}</span>
+                      <span className="text-muted-foreground text-xs">{g.pays}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedDepart && (
+                <p className="text-xs text-primary">✓ {selectedDepart}</p>
+              )}
+            </div>
+
+            {/* Gare arrivée */}
+            <div className="space-y-2 relative">
+              <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
+                Gare d'arrivée <span className="text-muted-foreground/40">(optionnel)</span>
+              </Label>
+              <div className="relative">
+                <Input
+                  value={gareArrivee}
+                  onChange={e => { setGareArrivee(e.target.value); setSelectedArrivee('') }}
+                  onFocus={() => garesArrivee.length > 0 && setShowArriveeList(true)}
+                  placeholder="Tapez une ville... (ex: Lyon)"
+                  className="bg-card border-border/50"
+                />
+                {selectedArrivee && (
+                  <button
+                    onClick={() => { setGareArrivee(''); setSelectedArrivee(''); setShowArriveeList(false) }}
+                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Effacer gare arrivée"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              {showArriveeList && garesArrivee.length > 0 && (
+                <div className="absolute z-50 w-full bg-card border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
+                  {garesArrivee.map(g => (
+                    <button
+                      key={g.id_gare}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex justify-between"
+                      onClick={() => {
+                        setGareArrivee(g.nom)
+                        setSelectedArrivee(g.nom)
+                        setShowArriveeList(false)
+                      }}
+                    >
+                      <span>{g.nom}</span>
+                      <span className="text-muted-foreground text-xs">{g.pays}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {selectedArrivee && (
+                <p className="text-xs text-primary">✓ {selectedArrivee}</p>
+              )}
+            </div>
+
+            <div className="flex items-end">
+              <Button
+                onClick={handleSearch}
+                disabled={searching}
+                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Search className="h-4 w-4 mr-2" />
+                {searching ? 'Recherche...' : 'Rechercher'}
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── FILTRES AVANCÉS ── */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
           <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Operateur</Label>
+            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Opérateur</Label>
             <Select value={selectedOperator} onValueChange={setSelectedOperator}>
               <SelectTrigger className="bg-card border-border/50"><SelectValue placeholder="Tous" /></SelectTrigger>
               <SelectContent>
@@ -140,7 +307,6 @@ export default function HorairesPage() {
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-2">
             <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Type service</Label>
             <Select value={selectedService} onValueChange={setSelectedService}>
@@ -152,7 +318,6 @@ export default function HorairesPage() {
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-2">
             <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Type ligne</Label>
             <Select value={selectedLine} onValueChange={setSelectedLine}>
@@ -160,22 +325,29 @@ export default function HorairesPage() {
               <SelectContent>
                 <SelectItem value="all">Tous</SelectItem>
                 <SelectItem value="national">National</SelectItem>
-                <SelectItem value="regional">Regional</SelectItem>
+                <SelectItem value="regional">Régional</SelectItem>
               </SelectContent>
             </Select>
           </div>
-
           <div className="space-y-2">
             <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
-              Distance: {distanceRange[0]} - {distanceRange[1]} km
+              Distance: {distanceRange[0]}-{distanceRange[1]} km
             </Label>
             <Slider value={distanceRange} onValueChange={setDistanceRange} min={0} max={917} step={50} className="mt-4" />
           </div>
         </div>
 
+        <div className="mb-6 flex justify-end">
+          <Button onClick={handleSearch} disabled={searching} variant="outline" size="sm"
+            className="bg-primary/10 border-primary/30 text-primary hover:bg-primary/20">
+            <Search className="h-3.5 w-3.5 mr-2" />
+            {searching ? 'Recherche...' : 'Appliquer les filtres'}
+          </Button>
+        </div>
+
         <StatRow
           items={[
-            { value: stats.count.toLocaleString(), label: 'Resultats' },
+            { value: stats.count.toLocaleString(), label: 'Résultats' },
             { value: `${stats.totalDistance.toLocaleString()} km`, label: 'Distance totale' },
             { value: `${stats.avgDistance.toFixed(0)} km`, label: 'Distance moyenne' },
             { value: `${stats.totalCO2.toFixed(0)} kg`, label: 'CO2 total' },
@@ -185,7 +357,7 @@ export default function HorairesPage() {
 
         {filteredTrains.length === 0 ? (
           <div className="rounded-xl border-l-2 border-primary bg-primary/5 p-4 text-sm text-primary">
-            Aucun train trouve.
+            Aucun train trouvé. Modifiez vos critères de recherche.
           </div>
         ) : (
           <>
@@ -194,7 +366,7 @@ export default function HorairesPage() {
               className="bg-primary/10 border-primary/30 text-primary hover:bg-primary/20">
               <Download className="h-3.5 w-3.5 mr-2" />Export CSV
             </Button>
-            <SectionTitle>Departs par heure</SectionTitle>
+            <SectionTitle>Départs par heure</SectionTitle>
             <div className="rounded-xl border border-border/50 bg-card p-5">
               <BarChartComponent data={departuresByHour} height={200} color="#00c98d" />
             </div>
@@ -208,3 +380,5 @@ export default function HorairesPage() {
     </div>
   )
 }
+
+
