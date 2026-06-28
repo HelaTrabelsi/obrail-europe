@@ -4,6 +4,8 @@ from sqlalchemy import create_engine, text
 from typing import Optional
 from prometheus_fastapi_instrumentator import Instrumentator
 import os
+import joblib
+from pydantic import BaseModel
 
 app = FastAPI(
     title="ObRail Europe API",
@@ -233,3 +235,104 @@ def get_stats_qualite():
             "par_source": [dict(r) for r in src]
         }
     except Exception as e: raise HTTPException(status_code=500, detail=str(e))
+
+    
+class PredictRequest(BaseModel):
+    distance_km: float
+    operateur: str          # "SNCF" | "Deutsche Bahn" | "SNCB"
+    type_service: str       # "Jour" | "Nuit"
+    type_ligne: str         # "national" | "regional"
+    heure_depart: str       # "HH:MM:SS"
+ 
+class PredictResponse(BaseModel):
+    co2_prediction_kg: float
+    type_service_prediction: str
+    co2_avion_kg: float
+    economie_pct: float
+    ratio_avion_train: float
+    modele_co2: str
+    modele_classification: str
+ 
+# ── Chargement des modèles au démarrage ───────────────────
+# Ajouter dans la section startup de main.py :
+ 
+MODEL_CO2  = None
+MODEL_NUIT = None
+ 
+def load_models():
+    global MODEL_CO2, MODEL_NUIT
+    import os
+    path_co2  = "notebooks/outputs_models/best_model_co2.joblib"
+    path_nuit = "notebooks/outputs_models/best_model_nuit.joblib"
+    if os.path.exists(path_co2):
+        MODEL_CO2  = joblib.load(path_co2)
+        MODEL_NUIT = joblib.load(path_nuit)
+        print(f"✅ Modèles ML chargés : {type(MODEL_CO2).__name__} + {type(MODEL_NUIT).__name__}")
+    else:
+        print("⚠️ Modèles ML non trouvés — /predict indisponible")
+ 
+# ── Endpoint /predict ─────────────────────────────────────
+@app.post("/predict", response_model=PredictResponse, tags=["IA"])
+def predict(req: PredictRequest):
+    """
+    Prédit les émissions CO2 et le type de service d'un trajet.
+    
+    - **distance_km** : distance du trajet en km
+    - **operateur** : SNCF | Deutsche Bahn | SNCB
+    - **type_service** : Jour | Nuit
+    - **type_ligne** : national | regional
+    - **heure_depart** : heure de départ HH:MM:SS
+    """
+    import math
+ 
+    if MODEL_CO2 is None:
+        raise HTTPException(status_code=503, detail="Modèles ML non chargés")
+ 
+    # Encodage des features
+    operateur_map = {"Deutsche Bahn": 0, "SNCB": 1, "SNCF": 2}
+    operateur_enc = operateur_map.get(req.operateur, 0)
+    type_service_enc = 1 if req.type_service == "Nuit" else 0
+    type_ligne_enc   = 1 if req.type_ligne == "national" else 0
+ 
+    try:
+        heure = int(req.heure_depart.split(":")[0]) % 24
+    except Exception:
+        heure = 12
+ 
+    heure_sin = math.sin(2 * math.pi * heure / 24)
+    heure_cos = math.cos(2 * math.pi * heure / 24)
+ 
+    # Distance bucket
+    d = req.distance_km
+    if d < 100:   bucket = 0
+    elif d < 300: bucket = 1
+    elif d < 600: bucket = 2
+    else:         bucket = 3
+ 
+    features_co2 = [[
+        req.distance_km, operateur_enc, type_service_enc,
+        type_ligne_enc, heure_sin, heure_cos, bucket
+    ]]
+ 
+    features_nuit = [[
+        heure_sin, heure_cos, type_ligne_enc,
+        operateur_enc, req.distance_km, bucket
+    ]]
+ 
+    co2_pred = float(MODEL_CO2.predict(features_co2)[0])
+    nuit_pred = int(MODEL_NUIT.predict(features_nuit)[0])
+    type_pred = "Nuit" if nuit_pred == 1 else "Jour"
+ 
+    co2_avion = req.distance_km * 258 / 1000
+    economie  = (co2_avion - co2_pred) / co2_avion * 100 if co2_avion > 0 else 0
+    ratio     = co2_avion / co2_pred if co2_pred > 0 else 18.4
+ 
+    return PredictResponse(
+        co2_prediction_kg       = round(co2_pred, 4),
+        type_service_prediction = type_pred,
+        co2_avion_kg            = round(co2_avion, 3),
+        economie_pct            = round(economie, 2),
+        ratio_avion_train       = round(ratio, 2),
+        modele_co2              = type(MODEL_CO2).__name__,
+        modele_classification   = type(MODEL_NUIT).__name__,
+    )

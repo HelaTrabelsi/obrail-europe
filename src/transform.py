@@ -124,7 +124,7 @@ class DataTransformer:
         journeys['type_service']     = journeys['heure_depart'].apply(
             lambda x: 'Nuit' if int(str(x).split(':')[0]) >= 22 or int(str(x).split(':')[0]) < 5 else 'Jour')
         journeys['type_ligne']       = 'regional' if any(k in source_name for k in ['ter','regional']) else 'national'
-        journeys['emissions_co2_gkm']= 3.8
+        journeys['emissions_co2_gkm']= 14
         journeys['source_donnee']    = f"gtfs_{source_name}"
         journeys['nom_ligne']        = journeys['gare_depart_nom'] + ' → ' + journeys['gare_arrivee_nom']
 
