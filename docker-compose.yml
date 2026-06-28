@@ -10,7 +10,7 @@ services:
     environment:
       POSTGRES_DB: obrail_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: "1234"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -36,7 +36,7 @@ services:
       DB_PORT: 5432
       DB_NAME: obrail_db
       DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: "1234"
     volumes:
       - ./data:/app/data
       - ./src:/app/src
@@ -57,7 +57,7 @@ services:
       DB_PORT: 5432
       DB_NAME: obrail_db
       DB_USER: postgres
-      DB_PASSWORD: postgres
+      DB_PASSWORD: "1234"
     ports:
       - "8000:8000"
     healthcheck:
@@ -70,7 +70,7 @@ services:
   dashboard:
     build:
       context: .
-      dockerfile: Dockerfile.dashboard
+      dockerfile: Dockerfile.frontend
     container_name: obrail_dashboard
     restart: unless-stopped
     depends_on:

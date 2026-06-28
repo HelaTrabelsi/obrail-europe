@@ -20,7 +20,7 @@ app.add_middleware(
 Instrumentator().instrument(app).expose(app)
 
 DB_URL = (
-    f"postgresql://{os.getenv('DB_USER','postgres')}:{os.getenv('DB_PASSWORD','postgres')}"
+    f"postgresql://{os.getenv('DB_USER','postgres')}:{os.getenv('DB_PASSWORD','1234')}"
     f"@{os.getenv('DB_HOST','db')}:{os.getenv('DB_PORT','5432')}/{os.getenv('DB_NAME','obrail_db')}"
 )
 

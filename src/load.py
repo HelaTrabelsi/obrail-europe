@@ -13,7 +13,7 @@ class DataLoader:
             'port':     os.getenv('DB_PORT',     '5432'),
             'database': os.getenv('DB_NAME',     'obrail_db'),
             'user':     os.getenv('DB_USER',     'postgres'),
-            'password': os.getenv('DB_PASSWORD', 'postgres')
+            'password': os.getenv('DB_PASSWORD', '1234')
         }
         self.engine = None
         base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

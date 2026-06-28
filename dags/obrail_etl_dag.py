@@ -83,7 +83,7 @@ with DAG(
             port=os.getenv("DB_PORT", "5432"),
             database=os.getenv("DB_NAME", "obrail_db"),
             user=os.getenv("DB_USER", "postgres"),
-            password=os.getenv("DB_PASSWORD", "postgres"),
+            password=os.getenv("DB_PASSWORD", "1234"),
         )
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM train")

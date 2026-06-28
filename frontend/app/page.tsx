@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useMemo } from 'react'
+import { toast } from 'sonner'
 import { TopNav } from '@/components/dashboard/top-nav'
 import { PageHeader } from '@/components/dashboard/page-header'
 import { KPICard, KPIGrid } from '@/components/dashboard/kpi-card'
@@ -9,6 +10,7 @@ import { SourceCard } from '@/components/dashboard/source-card'
 import { GroupedBarChart, DonutChart } from '@/components/dashboard/charts'
 import {
   getTrainsFromAPI, getOperateursFromAPI, getStatsFromAPI, getHealth,
+  getStatsQualiteFromAPI,
   type Train, type Operateur, type Stats
 } from '@/lib/api-client'
 
@@ -18,29 +20,71 @@ export default function HomePage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [apiStatus, setApiStatus] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [dataStale, setDataStale] = useState(false)
 
   useEffect(() => {
+    let lastEtlRunDate: string | null = null
+
     async function load() {
       try {
         const health = await getHealth()
-        setApiStatus(health.status === 'ok')
+        const isOnline = health.status === 'ok'
+        setApiStatus(isOnline)
 
-        const [t, o, s] = await Promise.all([
+        if (!isOnline) {
+          toast.error("API hors ligne", { description: "Le serveur ne répond pas correctement." })
+          return
+        }
+
+        const [t, o, s, q] = await Promise.all([
           getTrainsFromAPI({ limit: 50 }),
           getOperateursFromAPI(),
           getStatsFromAPI(),
+          getStatsQualiteFromAPI(),
         ])
         setTrains(t)
         setOperators(o)
         setStats(s)
+
+        if (q.etl_logs.length > 0) {
+          const sorted = [...q.etl_logs].sort(
+            (a, b) => new Date(b.run_date).getTime() - new Date(a.run_date).getTime()
+          )
+          lastEtlRunDate = sorted[0].run_date
+          const hoursAgo = (Date.now() - new Date(lastEtlRunDate).getTime()) / (1000 * 60 * 60)
+          setDataStale(hoursAgo > 24)
+        }
       } catch (e) {
         console.error('API indisponible:', e)
         setApiStatus(false)
+        toast.error("API indisponible", { description: "Vérifiez que le serveur est démarré." })
       } finally {
         setLoading(false)
       }
     }
+
     load()
+
+    const interval = setInterval(async () => {
+      try {
+        const q = await getStatsQualiteFromAPI()
+        if (q.etl_logs.length === 0) return
+        const sorted = [...q.etl_logs].sort(
+          (a, b) => new Date(b.run_date).getTime() - new Date(a.run_date).getTime()
+        )
+        const latestDate = sorted[0].run_date
+        if (lastEtlRunDate && latestDate !== lastEtlRunDate) {
+          toast.success("ETL Airflow terminé", {
+            description: `Données mises à jour le ${new Date(latestDate).toLocaleString('fr-FR')}`
+          })
+          lastEtlRunDate = latestDate
+          const hoursAgo = (Date.now() - new Date(latestDate).getTime()) / (1000 * 60 * 60)
+          setDataStale(hoursAgo > 24)
+        }
+      } catch { /* polling silencieux */ }
+    }, 30_000)
+
+    return () => clearInterval(interval)
   }, [])
 
   const kpis = useMemo(() => {
@@ -87,7 +131,7 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <TopNav apiStatus={apiStatus} />
+      <TopNav apiStatus={apiStatus} dataStale={dataStale} />
       <main className="mx-auto max-w-7xl px-6 pb-16">
         <PageHeader
           eyebrow="Tableau de bord"
@@ -143,5 +187,3 @@ export default function HomePage() {
     </div>
   )
 }
-
-

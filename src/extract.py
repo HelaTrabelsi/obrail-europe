@@ -10,13 +10,18 @@ load_dotenv()
 
 class DataExtractor:
     def __init__(self):
-        # Sources API (CO2)
+        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.raw_dir  = os.path.join(base, 'data', 'raw')
+        self.gtfs_dir = os.path.join(self.raw_dir, 'gtfs')
+  #source api 
         self.base_url = "https://ressources.data.sncf.com/api/explore/v2.1/catalog/datasets"
         self.api_sources = {
-            'co2_usage': 'emission-co2-perimetre-usage',
+            'co2_usage':   'emission-co2-perimetre-usage',
+          
             'co2_complet': 'emission-co2-perimetre-complet'
         }
-        # Sources GTFS
+        
+        #source gtfs
         self.gtfs_sources = {
             "sncf_ter": {
                 "url": "https://eu.ftp.opendatasoft.com/sncf/gtfs/export-ter-gtfs-last.zip",
@@ -42,7 +47,7 @@ class DataExtractor:
         self.proxies = None
         if os.getenv('HTTP_PROXY'):
             self.proxies = {
-                'http': os.getenv('HTTP_PROXY'),
+                'http':  os.getenv('HTTP_PROXY'),
                 'https': os.getenv('HTTPS_PROXY', os.getenv('HTTP_PROXY'))
             }
 
@@ -71,8 +76,8 @@ class DataExtractor:
         return all_records
 
     def save_json(self, data, name):
-        os.makedirs('../data/raw', exist_ok=True)
-        path = f"../data/raw/{name}_{datetime.now().strftime('%Y%m%d')}.json"
+        os.makedirs(self.raw_dir, exist_ok=True)
+        path = os.path.join(self.raw_dir, f"{name}_{datetime.now().strftime('%Y%m%d')}.json")
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
         print(f"    Sauvegardé : {path}")
@@ -87,7 +92,7 @@ class DataExtractor:
         except Exception as e:
             print(f"    Téléchargement GTFS {source_name} échoué : {e}")
             return False
-        target_dir = f"../data/raw/gtfs/{source_name}"
+        target_dir = os.path.join(self.gtfs_dir, source_name)
         os.makedirs(target_dir, exist_ok=True)
         with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
             tmp.write(r.content)
@@ -105,13 +110,11 @@ class DataExtractor:
 
     def run_extraction(self):
         print(" EXTRACTION DES DONNÉES (API + GTFS)")
-        # API
         for name, ds_id in self.api_sources.items():
             print(f"\n API {name}")
             records = self.extract_api_dataset(name, ds_id)
             if records:
                 self.save_json(records, name)
-        # GTFS
         print("\n TÉLÉCHARGEMENT DES SOURCES GTFS")
         for name, info in self.gtfs_sources.items():
             print(f"\n GTFS {name}")

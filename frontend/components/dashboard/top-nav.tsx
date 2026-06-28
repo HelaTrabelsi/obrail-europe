@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { 
   Home, Clock, BarChart3, GitBranch, 
-  Leaf, CheckCircle2, Train 
+  Leaf, CheckCircle2, Train, AlertCircle
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -19,9 +19,10 @@ const navItems = [
 
 interface TopNavProps {
   apiStatus?: boolean
+  dataStale?: boolean
 }
 
-export function TopNav({ apiStatus = true }: TopNavProps) {
+export function TopNav({ apiStatus = true, dataStale = false }: TopNavProps) {
   const pathname = usePathname()
 
   return (
@@ -43,17 +44,25 @@ export function TopNav({ apiStatus = true }: TopNavProps) {
           </div>
         </div>
 
-        {/* Status pill */}
-        <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card px-3 py-1.5 text-xs text-muted-foreground">
-          <span 
-            className={cn(
-              "h-1.5 w-1.5 rounded-full",
-              apiStatus 
-                ? "bg-primary animate-pulse-live" 
-                : "bg-destructive"
-            )} 
-          />
-          {apiStatus ? 'En ligne' : 'Hors ligne'}
+        {/* Status pills */}
+        <div className="flex items-center gap-2">
+          {dataStale && (
+            <div className="flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-400">
+              <AlertCircle className="h-3 w-3" />
+              Données obsolètes
+            </div>
+          )}
+          <div className="flex items-center gap-2 rounded-md border border-border/50 bg-card px-3 py-1.5 text-xs text-muted-foreground">
+            <span 
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                apiStatus 
+                  ? "bg-primary animate-pulse-live" 
+                  : "bg-destructive"
+              )} 
+            />
+            {apiStatus ? 'En ligne' : 'Hors ligne'}
+          </div>
         </div>
       </div>
 
@@ -81,5 +90,3 @@ export function TopNav({ apiStatus = true }: TopNavProps) {
     </header>
   )
 }
-
-
