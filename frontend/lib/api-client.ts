@@ -1,9 +1,11 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
+﻿const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export interface Train {
   id_train: number
   operateur: string
   gare: string
+  gare_arrivee?: string
+  pays_arrivee?: string
   pays: string
   type_service: 'Jour' | 'Nuit'
   type_ligne: string
@@ -94,7 +96,7 @@ export async function getHealth(): Promise<HealthStatus> {
   return apiFetch<HealthStatus>('/health')
 }
 
-// Limite par défaut à 50 pour éviter de surcharger le navigateur
+// Limite par dÃ©faut Ã  50 pour Ã©viter de surcharger le navigateur
 export async function getTrainsFromAPI(params?: {
   gare?: string
   gare_depart?: string
@@ -106,7 +108,7 @@ export async function getTrainsFromAPI(params?: {
   limit?: number
 }): Promise<Train[]> {
   const { gare_depart, gare_arrivee, ...rest } = params || {}
-  // Si gare_depart ou gare_arrivee → utilise le champ gare de l'API
+  // Si gare_depart ou gare_arrivee â†’ utilise le champ gare de l'API
   const gare = gare_depart || gare_arrivee || rest.gare
   const trains = await apiFetch<Train[]>('/dessertes/search', {
     limit: 50,
@@ -116,7 +118,7 @@ export async function getTrainsFromAPI(params?: {
   return normalizeTrains(trains)
 }
 
-// Récupère la liste des gares disponibles
+// RÃ©cupÃ¨re la liste des gares disponibles
 export async function getGaresFromAPI(nom?: string): Promise<{ id_gare: number; nom: string; pays: string }[]> {
   return apiFetch('/gares', nom ? { nom } : {})
 }

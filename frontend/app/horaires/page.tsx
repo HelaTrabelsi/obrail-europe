@@ -1,384 +1,389 @@
-'use client'
+﻿'use client'
 
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import React, { useState, useMemo, useEffect } from 'react'
 import { TopNav } from '@/components/dashboard/top-nav'
-import { PageHeader } from '@/components/dashboard/page-header'
-import { SectionTitle } from '@/components/dashboard/section-title'
-import { StatRow } from '@/components/dashboard/source-card'
-import { DataTable } from '@/components/dashboard/data-table'
-import { BarChartComponent } from '@/components/dashboard/charts'
+import { Search, X, ChevronDown, ChevronUp, Loader2, Train as TrainIcon } from 'lucide-react'
 import {
   getTrainsFromAPI, getOperateursFromAPI, getGaresFromAPI,
   type Train, type Operateur
 } from '@/lib/api-client'
-import { Label } from '@/components/ui/label'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Slider } from '@/components/ui/slider'
-import { Button } from '@/components/ui/button'
-import { Download, Search, Train as TrainIcon, X } from 'lucide-react'
+
+const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 export default function HorairesPage() {
-  const [trains, setTrains] = useState<Train[]>([])
+  const [trains, setTrains]       = useState<Train[]>([])
   const [operators, setOperators] = useState<Operateur[]>([])
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading]     = useState(true)
   const [searching, setSearching] = useState(false)
   const [apiStatus, setApiStatus] = useState(false)
 
-  // Filtres simples
-  const [selectedOperator, setSelectedOperator] = useState('all')
-  const [selectedService, setSelectedService] = useState('all')
-  const [selectedLine, setSelectedLine] = useState('all')
-  const [distanceRange, setDistanceRange] = useState([0, 917])
+  const [selOp, setSelOp]   = useState('all')
+  const [selSvc, setSelSvc] = useState('all')
 
-  // Recherche gare par texte
-  const [gareDepart, setGareDepart] = useState('')
-  const [gareArrivee, setGareArrivee] = useState('')
-  const [garesDepart, setGaresDepart] = useState<{ id_gare: number; nom: string; pays: string }[]>([])
-  const [garesArrivee, setGaresArrivee] = useState<{ id_gare: number; nom: string; pays: string }[]>([])
-  const [showDepartList, setShowDepartList] = useState(false)
-  const [showArriveeList, setShowArriveeList] = useState(false)
-  const [selectedDepart, setSelectedDepart] = useState('')
-  const [selectedArrivee, setSelectedArrivee] = useState('')
+  const [txtDep, setTxtDep]   = useState('')
+  const [gasDep, setGasDep]   = useState<{id_gare:number;nom:string;pays:string}[]>([])
+  const [showDep, setShowDep] = useState(false)
+  const [selDep, setSelDep]   = useState('')
 
-  // Chargement initial
+  const [txtArr, setTxtArr]   = useState('')
+  const [gasArr, setGasArr]   = useState<{id_gare:number;nom:string;pays:string}[]>([])
+  const [showArr, setShowArr] = useState(false)
+  const [selArr, setSelArr]   = useState('')
+
+  const [expandedId, setExpandedId]   = useState<number | null>(null)
+  const [detailData, setDetailData]   = useState<Record<number, any>>({})
+  const [loadingDetail, setLoadingDetail] = useState<number | null>(null)
+
   useEffect(() => {
     async function load() {
       try {
         const [t, o] = await Promise.all([
-          getTrainsFromAPI({ limit: 50 }),
+          getTrainsFromAPI({ limit: 100 }),
           getOperateursFromAPI(),
         ])
-        setTrains(t)
-        setOperators(o)
-        setApiStatus(true)
-      } catch (e) {
-        setApiStatus(false)
-      } finally {
-        setLoading(false)
-      }
+        setTrains(t); setOperators(o); setApiStatus(true)
+      } catch { setApiStatus(false) }
+      finally { setLoading(false) }
     }
     load()
   }, [])
 
-  // Recherche gares départ par texte
   useEffect(() => {
-    if (gareDepart.length < 2) { setGaresDepart([]); return }
-    const timer = setTimeout(async () => {
-      try {
-        const g = await getGaresFromAPI(gareDepart)
-        setGaresDepart(g.slice(0, 15))
-        setShowDepartList(true)
-      } catch {}
+    if (txtDep.length < 2) { setGasDep([]); return }
+    const t = setTimeout(async () => {
+      try { const g = await getGaresFromAPI(txtDep); setGasDep(g.slice(0, 12)); setShowDep(true) } catch {}
     }, 300)
-    return () => clearTimeout(timer)
-  }, [gareDepart])
+    return () => clearTimeout(t)
+  }, [txtDep])
 
-  // Recherche gares arrivée par texte
   useEffect(() => {
-    if (gareArrivee.length < 2) { setGaresArrivee([]); return }
-    const timer = setTimeout(async () => {
-      try {
-        const g = await getGaresFromAPI(gareArrivee)
-        setGaresArrivee(g.slice(0, 15))
-        setShowArriveeList(true)
-      } catch {}
+    if (txtArr.length < 2) { setGasArr([]); return }
+    const t = setTimeout(async () => {
+      try { const g = await getGaresFromAPI(txtArr); setGasArr(g.slice(0, 12)); setShowArr(true) } catch {}
     }, 300)
-    return () => clearTimeout(timer)
-  }, [gareArrivee])
+    return () => clearTimeout(t)
+  }, [txtArr])
 
   const handleSearch = async () => {
     setSearching(true)
+    setExpandedId(null)
     try {
-      const params: any = { limit: 50 }
-      if (selectedOperator !== 'all') params.operateur = selectedOperator
-      if (selectedService !== 'all') params.type_service = selectedService
-      if (selectedDepart) params.gare = selectedDepart
-      if (distanceRange[0] > 0) params.dist_min = distanceRange[0]
-      if (distanceRange[1] < 917) params.dist_max = distanceRange[1]
+      const params: any = { limit: 200 }
+      if (selOp !== 'all') params.operateur = selOp
+      if (selSvc !== 'all') params.type_service = selSvc
+      if (selDep) params.gare = selDep
       const t = await getTrainsFromAPI(params)
-      setTrains(t)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setSearching(false)
-    }
+      // Filtre côté client sur gare d'arrivée
+      const filtered = selArr
+        ? t.filter(tr => tr.gare_arrivee?.toLowerCase().includes(selArr.toLowerCase()))
+        : t
+      setTrains(filtered)
+    } catch {}
+    finally { setSearching(false) }
   }
 
-  const filteredTrains = useMemo(() => {
-    return trains.filter(t => {
-      if (selectedLine !== 'all' && t.type_ligne !== selectedLine) return false
-      return true
-    })
-  }, [trains, selectedLine])
+  const handleToggleDetail = async (train: Train) => {
+    if (expandedId === train.id_train) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(train.id_train)
+    if (detailData[train.id_train]) return
+    setLoadingDetail(train.id_train)
+    try {
+      const res = await fetch(`${API}/dessertes/${train.id_train}`)
+      if (res.ok) {
+        const data = await res.json()
+        setDetailData(prev => ({ ...prev, [train.id_train]: data }))
+      }
+    } catch {}
+    finally { setLoadingDetail(null) }
+  }
 
   const stats = useMemo(() => ({
-    count: filteredTrains.length,
-    totalDistance: filteredTrains.reduce((acc, t) => acc + t.distance_km, 0),
-    avgDistance: filteredTrains.length > 0
-      ? filteredTrains.reduce((acc, t) => acc + t.distance_km, 0) / filteredTrains.length : 0,
-    totalCO2: filteredTrains.reduce((acc, t) => acc + (t.co2_emission_kg || 0), 0),
-  }), [filteredTrains])
-
-  const departuresByHour = useMemo(() => {
-    const hours: Record<number, number> = {}
-    filteredTrains.forEach(t => {
-      const h = parseInt(t.heure_depart?.split(':')[0] || '0') % 24
-      hours[h] = (hours[h] || 0) + 1
-    })
-    return Array.from({ length: 24 }, (_, i) => ({
-      name: i.toString().padStart(2, '0') + 'h',
-      value: hours[i] || 0,
-    }))
-  }, [filteredTrains])
-
-  const tableColumns = [
-    { key: 'operator', label: 'Opérateur' },
-    { key: 'origin_station', label: 'Gare' },
-    { key: 'heure_depart', label: 'H. départ' },
-    { key: 'heure_arrivee', label: 'H. arrivée' },
-    { key: 'distance_km', label: 'Dist. km', align: 'right' as const },
-    { key: 'co2_emission_kg', label: 'CO2 kg', align: 'right' as const },
-    { key: 'type_service', label: 'Type' },
-  ]
-
-  const tableData = useMemo(() => {
-    return filteredTrains.slice(0, 100).map(t => ({
-      ...t,
-      distance_km: t.distance_km.toFixed(1),
-      co2_emission_kg: (t.co2_emission_kg || 0).toFixed(3),
-    }))
-  }, [filteredTrains])
-
-  const handleExport = () => {
-    const csv = [
-      tableColumns.map(c => c.label).join(','),
-      ...tableData.map(row => tableColumns.map(c => row[c.key as keyof typeof row]).join(','))
-    ].join('\n')
-    const blob = new Blob([csv], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'trains_obrail.csv'
-    a.click()
-  }
+    count:    trains.length,
+    avgDist:  trains.length
+      ? (trains.reduce((a, t) => a + t.distance_km, 0) / trains.length).toFixed(0)
+      : '0',
+    nbNuit:   trains.filter(t => t.type_service === 'Nuit').length,
+    totalCO2: trains.reduce((a, t) => a + t.distance_km * 14 / 1000, 0).toFixed(0),
+  }), [trains])
 
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="text-muted-foreground text-sm">Chargement des données...</div>
+      <p className="text-muted-foreground text-sm">Chargement...</p>
     </div>
   )
 
   return (
     <div className="min-h-screen bg-background">
       <TopNav apiStatus={apiStatus} />
-      <main className="mx-auto max-w-7xl px-6 pb-16">
-        <PageHeader
-          eyebrow="Recherche"
-          title="Horaires"
-          titleHighlight="& trains"
-          subtitle="Recherchez par gare de départ, opérateur, type de service ou distance"
-        />
+      <main id="main-content" className="mx-auto max-w-7xl px-4 md:px-6 pb-16">
 
-        {/* ── RECHERCHE GARE ── */}
-        <div className="mb-6 rounded-xl border border-primary/30 bg-primary/5 p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrainIcon className="h-4 w-4 text-primary" />
-            <span className="text-sm font-bold text-primary uppercase tracking-wide">
-              Recherche de trajet
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="mt-6 mb-6 pb-4 border-b border-border/40">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-1">
+            ObRail Europe — Horaires ferroviaires
+          </p>
+          <h1 className="text-2xl font-bold text-foreground">
+            Recherche de <span className="text-primary">trains</span>
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            SNCF · Deutsche Bahn · SNCB · Cliquez sur une ligne pour voir le détail
+          </p>
+        </div>
 
-            {/* Gare départ */}
-            <div className="space-y-2 relative">
-              <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
+        {/* Formulaire */}
+        <div className="rounded-xl border border-border/50 bg-card p-5 mb-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+
+            {/* Autocomplete gare départ */}
+            <div className="relative">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
                 Gare de départ
-              </Label>
+              </label>
               <div className="relative">
-                <Input
-                  value={gareDepart}
-                  onChange={e => { setGareDepart(e.target.value); setSelectedDepart('') }}
-                  onFocus={() => garesDepart.length > 0 && setShowDepartList(true)}
-                  placeholder="Tapez une ville... (ex: Paris)"
-                  className="bg-card border-border/50"
-                />
-                {selectedDepart && (
-                  <button
-                    onClick={() => { setGareDepart(''); setSelectedDepart(''); setShowDepartList(false) }}
-                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
-                    aria-label="Effacer gare départ"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+                <input value={txtDep}
+                  onChange={e => { setTxtDep(e.target.value); setSelDep('') }}
+                  onFocus={() => gasDep.length > 0 && setShowDep(true)}
+                  onBlur={() => setTimeout(() => setShowDep(false), 150)}
+                  placeholder="Ex : Paris, Berlin..."
+                  className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary"
+                  aria-label="Gare de départ" />
+                {selDep && <button onClick={() => { setTxtDep(''); setSelDep('') }}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground" aria-label="Effacer">
+                  <X className="h-4 w-4" /></button>}
               </div>
-              {showDepartList && garesDepart.length > 0 && (
-                <div className="absolute z-50 w-full bg-card border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                  {garesDepart.map(g => (
-                    <button
-                      key={g.id_gare}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex justify-between"
-                      onClick={() => {
-                        setGareDepart(g.nom)
-                        setSelectedDepart(g.nom)
-                        setShowDepartList(false)
-                      }}
-                    >
-                      <span>{g.nom}</span>
-                      <span className="text-muted-foreground text-xs">{g.pays}</span>
+              {showDep && gasDep.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                  {gasDep.map(g => (
+                    <button key={g.id_gare} onMouseDown={() => { setTxtDep(g.nom); setSelDep(g.nom); setShowDep(false) }}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40 flex justify-between">
+                      <span>{g.nom}</span><span className="text-muted-foreground text-xs">{g.pays}</span>
                     </button>
                   ))}
                 </div>
               )}
-              {selectedDepart && (
-                <p className="text-xs text-primary">✓ {selectedDepart}</p>
-              )}
+              {selDep && <p className="text-xs text-primary mt-1">Départ : {selDep}</p>}
             </div>
 
-            {/* Gare arrivée */}
-            <div className="space-y-2 relative">
-              <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
-                Gare d'arrivée <span className="text-muted-foreground/40">(optionnel)</span>
-              </Label>
+            {/* Autocomplete gare arrivée */}
+            <div className="relative">
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                Gare d'arrivée
+              </label>
               <div className="relative">
-                <Input
-                  value={gareArrivee}
-                  onChange={e => { setGareArrivee(e.target.value); setSelectedArrivee('') }}
-                  onFocus={() => garesArrivee.length > 0 && setShowArriveeList(true)}
-                  placeholder="Tapez une ville... (ex: Lyon)"
-                  className="bg-card border-border/50"
-                />
-                {selectedArrivee && (
-                  <button
-                    onClick={() => { setGareArrivee(''); setSelectedArrivee(''); setShowArriveeList(false) }}
-                    className="absolute right-2 top-2.5 text-muted-foreground hover:text-foreground"
-                    aria-label="Effacer gare arrivée"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                )}
+                <input value={txtArr}
+                  onChange={e => { setTxtArr(e.target.value); setSelArr('') }}
+                  onFocus={() => gasArr.length > 0 && setShowArr(true)}
+                  onBlur={() => setTimeout(() => setShowArr(false), 150)}
+                  placeholder="Ex : Lyon, Hambourg..."
+                  className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary"
+                  aria-label="Gare d'arrivée" />
+                {selArr && <button onClick={() => { setTxtArr(''); setSelArr('') }}
+                  className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground" aria-label="Effacer">
+                  <X className="h-4 w-4" /></button>}
               </div>
-              {showArriveeList && garesArrivee.length > 0 && (
-                <div className="absolute z-50 w-full bg-card border border-border rounded-md shadow-lg max-h-48 overflow-y-auto">
-                  {garesArrivee.map(g => (
-                    <button
-                      key={g.id_gare}
-                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/50 flex justify-between"
-                      onClick={() => {
-                        setGareArrivee(g.nom)
-                        setSelectedArrivee(g.nom)
-                        setShowArriveeList(false)
-                      }}
-                    >
-                      <span>{g.nom}</span>
-                      <span className="text-muted-foreground text-xs">{g.pays}</span>
+              {showArr && gasArr.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-card border border-border rounded-lg shadow-lg max-h-44 overflow-y-auto">
+                  {gasArr.map(g => (
+                    <button key={g.id_gare} onMouseDown={() => { setTxtArr(g.nom); setSelArr(g.nom); setShowArr(false) }}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-muted/40 flex justify-between">
+                      <span>{g.nom}</span><span className="text-muted-foreground text-xs">{g.pays}</span>
                     </button>
                   ))}
                 </div>
               )}
-              {selectedArrivee && (
-                <p className="text-xs text-primary">✓ {selectedArrivee}</p>
-              )}
+              {selArr && <p className="text-xs text-primary mt-1">Arrivée : {selArr}</p>}
             </div>
 
-            <div className="flex items-end">
-              <Button
-                onClick={handleSearch}
-                disabled={searching}
-                className="w-full bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                <Search className="h-4 w-4 mr-2" />
-                {searching ? 'Recherche...' : 'Rechercher'}
-              </Button>
+            {/* Opérateur */}
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                Opérateur
+              </label>
+              <select value={selOp} onChange={e => setSelOp(e.target.value)}
+                className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary">
+                <option value="all">Tous</option>
+                {operators.map(op => <option key={op.nom} value={op.nom}>{op.nom}</option>)}
+              </select>
+            </div>
+
+            {/* Service */}
+            <div>
+              <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block mb-1.5">
+                Service
+              </label>
+              <select value={selSvc} onChange={e => setSelSvc(e.target.value)}
+                className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary">
+                <option value="all">Tous</option>
+                <option value="Jour">Jour</option>
+                <option value="Nuit">Nuit</option>
+              </select>
             </div>
           </div>
-        </div>
 
-        {/* ── FILTRES AVANCÉS ── */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Opérateur</Label>
-            <Select value={selectedOperator} onValueChange={setSelectedOperator}>
-              <SelectTrigger className="bg-card border-border/50"><SelectValue placeholder="Tous" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous</SelectItem>
-                {operators.map(op => <SelectItem key={op.nom} value={op.nom}>{op.nom}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Type service</Label>
-            <Select value={selectedService} onValueChange={setSelectedService}>
-              <SelectTrigger className="bg-card border-border/50"><SelectValue placeholder="Tous" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous</SelectItem>
-                <SelectItem value="Jour">Jour</SelectItem>
-                <SelectItem value="Nuit">Nuit</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">Type ligne</Label>
-            <Select value={selectedLine} onValueChange={setSelectedLine}>
-              <SelectTrigger className="bg-card border-border/50"><SelectValue placeholder="Tous" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tous</SelectItem>
-                <SelectItem value="national">National</SelectItem>
-                <SelectItem value="regional">Régional</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted-foreground/60">
-              Distance: {distanceRange[0]}-{distanceRange[1]} km
-            </Label>
-            <Slider value={distanceRange} onValueChange={setDistanceRange} min={0} max={917} step={50} className="mt-4" />
+          <div className="mt-4">
+            <button onClick={handleSearch} disabled={searching}
+              className="flex items-center gap-2 rounded-lg bg-primary px-6 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
+              {searching
+                ? <><Loader2 className="h-4 w-4 animate-spin" />Recherche...</>
+                : <><Search className="h-4 w-4" />Rechercher</>
+              }
+            </button>
           </div>
         </div>
 
-        <div className="mb-6 flex justify-end">
-          <Button onClick={handleSearch} disabled={searching} variant="outline" size="sm"
-            className="bg-primary/10 border-primary/30 text-primary hover:bg-primary/20">
-            <Search className="h-3.5 w-3.5 mr-2" />
-            {searching ? 'Recherche...' : 'Appliquer les filtres'}
-          </Button>
+        {/* KPIs */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          {[
+            { l: 'Résultats',        v: stats.count.toLocaleString() },
+            { l: 'Distance moyenne', v: `${stats.avgDist} km` },
+            { l: 'Trains de nuit',   v: stats.nbNuit.toLocaleString() },
+            { l: 'CO₂ total estimé', v: `${stats.totalCO2} kg` },
+          ].map(k => (
+            <div key={k.l} className="rounded-lg border border-border/50 bg-card px-4 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{k.l}</p>
+              <p className="text-xl font-bold font-mono text-foreground mt-0.5">{k.v}</p>
+            </div>
+          ))}
         </div>
 
-        <StatRow
-          items={[
-            { value: stats.count.toLocaleString(), label: 'Résultats' },
-            { value: `${stats.totalDistance.toLocaleString()} km`, label: 'Distance totale' },
-            { value: `${stats.avgDistance.toFixed(0)} km`, label: 'Distance moyenne' },
-            { value: `${stats.totalCO2.toFixed(0)} kg`, label: 'CO2 total' },
-          ]}
-          className="mb-6"
-        />
-
-        {filteredTrains.length === 0 ? (
-          <div className="rounded-xl border-l-2 border-primary bg-primary/5 p-4 text-sm text-primary">
+        {/* Tableau */}
+        {trains.length === 0 ? (
+          <div className="rounded-xl border border-border/50 bg-card p-8 text-center text-muted-foreground text-sm">
             Aucun train trouvé. Modifiez vos critères de recherche.
           </div>
         ) : (
-          <>
-            <DataTable columns={tableColumns} data={tableData} className="mb-4" />
-            <Button onClick={handleExport} variant="outline" size="sm"
-              className="bg-primary/10 border-primary/30 text-primary hover:bg-primary/20">
-              <Download className="h-3.5 w-3.5 mr-2" />Export CSV
-            </Button>
-            <SectionTitle>Départs par heure</SectionTitle>
-            <div className="rounded-xl border border-border/50 bg-card p-5">
-              <BarChartComponent data={departuresByHour} height={200} color="#00c98d" />
-            </div>
-          </>
+          <div className="rounded-xl border border-border/50 bg-card overflow-hidden">
+            <table className="w-full text-sm" role="table">
+              <thead>
+                <tr className="border-b border-border/40 bg-muted/10">
+                  {['Opérateur','Gare de départ','Gare d\'arrivée','H. départ','H. arrivée','Distance','CO₂ estimé','Service'].map(h => (
+                    <th key={h} className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground whitespace-nowrap">
+                      {h}
+                    </th>
+                  ))}
+                  <th className="px-3 py-3 w-8" />
+                </tr>
+              </thead>
+              <tbody>
+                {trains.slice(0, 200).map((train, i) => {
+                  const isOpen    = expandedId === train.id_train
+                  const detail    = detailData[train.id_train]
+                  const isLoading = loadingDetail === train.id_train
+                  const co2       = (train.distance_km * 14 / 1000).toFixed(3)
+
+                  return (
+                    <React.Fragment key={`train-${train.id_train}`}>
+                      <tr
+                        onClick={() => handleToggleDetail(train)}
+                        className={`border-b border-border/20 cursor-pointer transition-colors ${
+                          isOpen
+                            ? 'bg-primary/5 border-primary/20'
+                            : i % 2 === 0 ? 'hover:bg-muted/10' : 'bg-muted/5 hover:bg-muted/10'
+                        }`}
+                        role="button"
+                        aria-expanded={isOpen}
+                        tabIndex={0}
+                        onKeyDown={e => e.key === 'Enter' && handleToggleDetail(train)}
+                      >
+                        <td className="px-4 py-2.5 font-medium text-foreground whitespace-nowrap">
+                          {train.operateur}
+                        </td>
+                        <td className="px-4 py-2.5 text-foreground max-w-[160px] truncate" title={train.gare}>
+                          {train.gare || '—'}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground max-w-[160px] truncate" title={train.gare_arrivee || ''}>
+                          {train.gare_arrivee || <span className="text-muted-foreground/40 text-xs italic">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-foreground whitespace-nowrap">
+                          {train.heure_depart}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-muted-foreground whitespace-nowrap">
+                          {train.heure_arrivee}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-right whitespace-nowrap">
+                          {train.distance_km.toFixed(1)} km
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-right text-primary whitespace-nowrap">
+                          {co2} kg
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                            train.type_service === 'Nuit'
+                              ? 'bg-indigo-500/20 text-indigo-400'
+                              : 'bg-amber-500/20 text-amber-500'
+                          }`}>
+                            {train.type_service}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2.5">
+                          {isOpen
+                            ? <ChevronUp className="h-4 w-4 text-primary" aria-hidden="true" />
+                            : <ChevronDown className="h-4 w-4 text-muted-foreground/40" aria-hidden="true" />
+                          }
+                        </td>
+                      </tr>
+
+                      {/* Panel détail */}
+                      {isOpen && (
+                        <tr>
+                          <td colSpan={9} className="bg-primary/5 border-b border-primary/20 px-6 py-4">
+                            <div className="flex items-center gap-2 mb-3">
+                              <TrainIcon className="h-4 w-4 text-primary" aria-hidden="true" />
+                              <p className="text-xs font-semibold text-foreground uppercase tracking-wider">
+                                Détail du train #{train.id_train}
+                              </p>
+                            </div>
+                            {isLoading ? (
+                              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                                Chargement...
+                              </div>
+                            ) : (
+                              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                {([
+                                  ['Gare de départ',      detail?.gare || train.gare],
+                                  ['Gare d\'arrivée',     detail?.gare_arrivee || train.gare_arrivee || '—'],
+                                  ['Heure départ',        detail?.heure_depart || train.heure_depart],
+                                  ['Heure arrivée',       detail?.heure_arrivee || train.heure_arrivee],
+                                  ['Distance',            `${(detail?.distance_km || train.distance_km).toFixed(1)} km`],
+                                  ['CO₂ train (ADEME)',   `${((detail?.distance_km || train.distance_km) * 14 / 1000).toFixed(3)} kg`],
+                                  ['CO₂ avion équivalent',`${((detail?.distance_km || train.distance_km) * 258 / 1000).toFixed(1)} kg`],
+                                  ['Économie vs avion',   '94,6 %'],
+                                  ['Opérateur',           detail?.operateur || train.operateur],
+                                  ['Type de service',     detail?.type_service || train.type_service],
+                                  ['Pays départ',         detail?.pays || train.pays],
+                                  ['Source GTFS',         detail?.source_donnee || '—'],
+                                ] as [string, string][]).map(([label, value]) => (
+                                  <div key={label} className="rounded-lg bg-muted/20 border border-border/20 px-3 py-2">
+                                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">{label}</p>
+                                    <p className="text-sm font-medium text-foreground mt-0.5">{value || '—'}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+              </tbody>
+            </table>
+
+            {trains.length > 200 && (
+              <div className="px-4 py-3 border-t border-border/30 text-center text-xs text-muted-foreground">
+                200 premiers résultats affichés sur {trains.length}
+              </div>
+            )}
+          </div>
         )}
 
-        <footer className="mt-16 pt-6 border-t border-border/30 text-center text-[10px] text-muted-foreground/40">
+        <footer className="mt-10 pt-6 border-t border-border/30 text-center text-[11px] text-muted-foreground/50">
           ObRail Europe · SNCF · Deutsche Bahn · SNCB · GTFS Open Data · ODbL
         </footer>
       </main>
     </div>
   )
 }
-
-

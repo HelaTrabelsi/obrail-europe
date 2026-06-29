@@ -59,3 +59,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+
+#MSPR 6.2 
+predict.py
+notebooks

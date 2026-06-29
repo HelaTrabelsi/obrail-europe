@@ -1,16 +1,15 @@
 version: "3.9"
 
-# ================================================================
-# ObRail Europe — Docker Compose COMPLET
+
 # Ports :
 #   5432 - PostgreSQL ObRail
 #   8000 - API FastAPI
 #   8501 - Dashboard Streamlit
-#   3000 - Frontend React/Next.js
+#   3002 - Frontend React/Next.js
 #   8080 - Airflow UI
 #   9090 - Prometheus
-#   3001 - Grafana (3001 car Next.js occupe le 3000)
-# ================================================================
+#   3001 - Grafana 
+
 
 x-airflow-common: &airflow-common
   image: apache/airflow:2.8.0
