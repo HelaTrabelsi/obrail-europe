@@ -1,4 +1,4 @@
-name: ObRail Europe — CI/CD Pipeline
+name: ObRail Europe - CI/CD Pipeline
 
 on:
   push:
@@ -8,10 +8,9 @@ on:
 
 jobs:
 
-  # Tests unitaires et d'intégration
-
+  # ── Job 1 : Tests unitaires pytest ─────────────────────────
   tests:
-    name: Tests automatises
+    name: Tests automatises (pytest)
     runs-on: ubuntu-latest
 
     steps:
@@ -30,14 +29,20 @@ jobs:
       - name: Execution des tests unitaires
         run: pytest tests/ -v --tb=short --cov=api --cov-report=term-missing
 
-      - name: Rapport de couverture
+      - name: Rapport de couverture XML
         run: pytest tests/ --cov=api --cov-report=xml
 
-  # Build des images Docker
+      - name: Upload rapport couverture
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  # ── Job 2 : Build images Docker ────────────────────────────
   build:
     name: Build Docker images
     runs-on: ubuntu-latest
-    needs: tests 
+    needs: tests
 
     steps:
       - name: Checkout du code
@@ -55,7 +60,7 @@ jobs:
       - name: Build image ETL
         run: docker build -f Dockerfile.etl -t obrail-etl:latest .
 
-  #  Validation Docker Compose
+  # ── Job 3 : Integration Docker Compose ─────────────────────
   integration:
     name: Test integration Docker Compose
     runs-on: ubuntu-latest
@@ -65,14 +70,114 @@ jobs:
       - name: Checkout du code
         uses: actions/checkout@v4
 
-      - name: Demarrage des services
-        run: |
-          docker compose up -d db api
-          sleep 20
+      - name: Demarrage DB et API
+        run: docker compose up -d db api
 
-      - name: Verification sante API
+      - name: Attente API disponible (retry 30 x 5s = 150s max)
         run: |
-          curl -f http://localhost:8000/health || exit 1
+          echo "Attente demarrage API..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              echo "API prete apres $((i*5)) secondes"
+              exit 0
+            fi
+            echo "Tentative $i/30 - nouvelle tentative dans 5s..."
+            sleep 5
+          done
+          echo "ECHEC : API non disponible apres 150 secondes"
+          echo "--- Logs API ---"
+          docker compose logs api
+          echo "--- Logs DB ---"
+          docker compose logs db
+          exit 1
+
+      - name: Verification endpoint /health
+        run: curl -f http://localhost:8000/health
+
+      - name: Verification endpoint /stats
+        run: curl -f http://localhost:8000/stats
+
+      - name: Verification endpoint /operateurs
+        run: curl -f http://localhost:8000/operateurs
 
       - name: Arret des services
+        if: always()
+        run: docker compose down
+
+  # ── Job 4 : Tests E2E Playwright ───────────────────────────
+  e2e:
+    name: Tests E2E Playwright
+    runs-on: ubuntu-latest
+    needs: integration
+
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installation Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Installation des dependances frontend
+        working-directory: frontend
+        run: npm ci
+
+      - name: Installation Playwright + navigateurs
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Demarrage complet (DB + API + Frontend)
+        run: |
+          docker compose up -d db api dashboard
+          echo "Attente demarrage services..."
+
+      - name: Attente API disponible
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health; then
+              echo "API prete"
+              break
+            fi
+            echo "Tentative API $i/30..."
+            sleep 5
+          done
+
+      - name: Attente Frontend disponible
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000; then
+              echo "Frontend pret"
+              break
+            fi
+            echo "Tentative Frontend $i/20..."
+            sleep 5
+          done
+
+      - name: Execution tests E2E Playwright
+        working-directory: frontend
+        env:
+          PLAYWRIGHT_BASE_URL: http://localhost:3000
+          CI: true
+        run: npx playwright test --reporter=html
+
+      - name: Upload rapport Playwright
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: frontend/playwright-report/
+          retention-days: 7
+
+      - name: Upload screenshots echecs
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-screenshots
+          path: frontend/test-results/
+
+      - name: Arret des services
+        if: always()
         run: docker compose down
