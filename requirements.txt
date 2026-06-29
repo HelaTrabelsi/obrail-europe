@@ -18,3 +18,8 @@ prometheus-fastapi-instrumentator
 
 # --- Utilitaires ---
 python-dotenv
+# --- Machine Learning ---
+joblib
+scikit-learn
+xgboost
+pandas
