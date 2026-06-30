@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, text
 from typing import Optional
 from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_client import Counter, Histogram
 import os
 import math
 import joblib
@@ -11,7 +12,7 @@ from pydantic import BaseModel
 
 app = FastAPI(
     title="ObRail Europe API",
-    description="API REST ” Donnees ferroviaires europeennes (SNCF, Deutsche Bahn, SNCB)",
+    description="API REST - Donnees ferroviaires europeennes (SNCF, Deutsche Bahn, SNCB)",
     version="2.0.0"
 )
 
@@ -21,6 +22,18 @@ app.add_middleware(
 )
 
 Instrumentator().instrument(app).expose(app)
+
+
+ml_predictions_total = Counter(
+    "obrail_ml_predictions_total",
+    "Nombre total de predictions ML effectuees",
+    ["modele"]
+)
+ml_prediction_latency = Histogram(
+    "obrail_ml_prediction_latency_seconds",
+    "Latence des predictions ML",
+    ["modele"]
+)
 
 DB_URL = (
     f"postgresql://{os.getenv('DB_USER','postgres')}:{os.getenv('DB_PASSWORD','1234')}"
@@ -61,21 +74,25 @@ BASE_QUERY = """
     LEFT JOIN gare g2 ON g2.id_gare      = tr.id_gare_arrivee
 """
 
-MODEL_CO2  = None
-MODEL_NUIT = None
-SCALER     = None
+MODEL_CO2 = None
+MODEL_DES = None
+SCALER    = None
 
 def load_models():
-    global MODEL_CO2, MODEL_NUIT, SCALER
+    global MODEL_CO2, MODEL_DES, SCALER
     path_co2    = "notebooks/outputs_models/best_model_co2.joblib"
-    path_nuit   = "notebooks/outputs_models/best_model_nuit.joblib"
+    path_des    = "notebooks/outputs_models/best_model_desserte.joblib"
     path_scaler = "notebooks/ml_splits/scaler.joblib"
     if os.path.exists(path_co2):
-        MODEL_CO2  = joblib.load(path_co2)
-        MODEL_NUIT = joblib.load(path_nuit)
-        print(f"Modeles ML charges : {type(MODEL_CO2).__name__} + {type(MODEL_NUIT).__name__}")
+        MODEL_CO2 = joblib.load(path_co2)
+        print(f"Modele CO2 charge : {type(MODEL_CO2).__name__}")
     else:
-        print("Modeles ML non trouves")
+        print("Modele CO2 non trouve")
+    if os.path.exists(path_des):
+        MODEL_DES = joblib.load(path_des)
+        print(f"Modele sous-desserte charge : {type(MODEL_DES).__name__}")
+    else:
+        print("Modele sous-desserte non trouve")
     if os.path.exists(path_scaler):
         SCALER = joblib.load(path_scaler)
         print(f"Scaler charge : mean={SCALER.mean_[0]:.4f}")
@@ -96,7 +113,7 @@ def health():
             "status": "ok",
             "database": "connected",
             "nb_trains": nb,
-            "modeles_ml": MODEL_CO2 is not None
+            "modeles_ml": MODEL_CO2 is not None and MODEL_DES is not None
         }
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -290,8 +307,8 @@ def get_stats_qualite():
 @app.get("/stats/sous-desserte", tags=["Statistiques"])
 def get_sous_desserte():
     """
-    DÃ©tecte les zones sous-desservies depuis les 99 854 trains rÃ©els.
-    CritÃ¨res : gares avec <= 3 trains ET distance moyenne < 150 km.
+    Detecte les zones sous-desservies depuis les trains reels.
+    Criteres : gares avec <= 3 trains ET 5km < distance moyenne < 150 km.
     """
     try:
         with get_engine().connect() as c:
@@ -340,34 +357,120 @@ def get_sous_desserte():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+# MLOps — Monitoring de derive des modeles ML
+
+
+@app.get("/stats/ml-monitoring", tags=["MLOps"])
+def ml_monitoring_latest():
+    """Derniere mesure de derive des modeles ML.
+    Utilise par le dashboard Grafana et la page /qualite du frontend."""
+    try:
+        with get_engine().connect() as c:
+            result = c.execute(text("""
+                SELECT run_date, n_observations, co2_moyenne, co2_variance,
+                       substitution_proportion, desserte_proportion,
+                       nb_alertes, alertes_json
+                FROM monitoring_ml_drift
+                ORDER BY run_date DESC
+                LIMIT 1
+            """)).mappings().first()
+
+        if not result:
+            return {
+                "statut": "aucune_mesure",
+                "message": "Aucun run de monitoring de derive n'a encore ete execute"
+            }
+
+        return {
+            "run_date": str(result["run_date"]),
+            "n_observations": result["n_observations"],
+            "co2_moyenne": round(result["co2_moyenne"], 4),
+            "co2_variance": round(result["co2_variance"], 4),
+            "substitution_proportion": round(result["substitution_proportion"], 4),
+            "desserte_proportion": round(result["desserte_proportion"], 4),
+            "nb_alertes": result["nb_alertes"],
+            "alertes": result["alertes_json"],
+            "statut": "alerte" if result["nb_alertes"] > 0 else "ok",
+        }
+    except Exception:
+
+        return {
+            "statut": "non_configure",
+            "message": "Table monitoring_ml_drift introuvable — executer mlops/monitor_drift.py"
+        }
+
+
+@app.get("/stats/ml-monitoring/history", tags=["MLOps"])
+def ml_monitoring_history(limit: int = 30):
+    """Historique des derniers runs de monitoring de derive
+    pour affichage de tendance dans Grafana / frontend."""
+    try:
+        with get_engine().connect() as c:
+            results = c.execute(text("""
+                SELECT run_date, co2_moyenne, substitution_proportion,
+                       desserte_proportion, nb_alertes
+                FROM monitoring_ml_drift
+                ORDER BY run_date DESC
+                LIMIT :limit
+            """), {"limit": limit}).mappings().all()
+
+        return {
+            "historique": [
+                {
+                    "run_date": str(r["run_date"]),
+                    "co2_moyenne": round(r["co2_moyenne"], 4),
+                    "substitution_proportion": round(r["substitution_proportion"], 4),
+                    "desserte_proportion": round(r["desserte_proportion"], 4),
+                    "nb_alertes": r["nb_alertes"],
+                }
+                for r in results
+            ]
+        }
+    except Exception:
+        return {"historique": []}
+
+
 class PredictRequest(BaseModel):
     distance_km:  float
-    operateur:    str   
-    type_service: str   
-    type_ligne:   str   
-    heure_depart: str   
+    operateur:    str
+    type_service: str
+    type_ligne:   str
+    heure_depart: str
 
 class PredictResponse(BaseModel):
-    co2_prediction_kg:       float
-    type_service_prediction: str
-    co2_avion_kg:            float
-    economie_pct:            float
-    ratio_avion_train:       float
-    modele_co2:              str
-    modele_classification:   str
+    co2_prediction_kg:    float
+    co2_avion_kg:         float
+    economie_pct:         float
+    ratio_avion_train:    float
+    modele_co2:           str
+    sous_desserte_pred:   int
+    sous_desserte_label:  str
+    modele_desserte:      str
 
 @app.post("/predict", response_model=PredictResponse, tags=["IA"])
 def predict(req: PredictRequest):
     """
-    Predit les admissions CO2 et le type de service d'un trajet ferroviaire.
-    Modele CO2 : XGBoost R²=0.88 ” 6 features (sans distance directe)
-    Modele Nuit : Random Forest F1=0.59 ” 4 features (sans heure)
+    Predit les emissions CO2 d'un trajet ferroviaire
+    et detecte si la liaison est potentiellement sous-desservie.
+
+    Enjeu 1 — CO2 : RandomForest R²=0.86
+      Features : operateur, type_service, type_ligne, pays, heure_sin/cos,
+                 distance_bucket (PAS distance directe — anti-leakage)
+
+    Enjeu 2 — Sous-desserte : Logistic Regression AUC=0.74
+      Features : operateur, pays, type_ligne, heure_sin/cos, co2_par_km
     """
-    if MODEL_CO2 is None:
+    if MODEL_CO2 is None or MODEL_DES is None:
         raise HTTPException(status_code=503, detail="Modeles ML non charges")
 
     operateur_map = {"Deutsche Bahn": 0, "SNCB": 1, "SNCF": 2}
+    pays_map      = {"DE": 0, "BE": 1, "FR": 2}
+
     operateur_enc = operateur_map.get(req.operateur, 0)
+    pays_enc      = pays_map.get(
+        "FR" if req.operateur == "SNCF"
+        else "DE" if req.operateur == "Deutsche Bahn" else "BE", 0)
     ts_enc        = 1 if req.type_service == "Nuit" else 0
     tl_enc        = 1 if req.type_ligne == "national" else 0
 
@@ -385,49 +488,57 @@ def predict(req: PredictRequest):
     elif d < 600: bucket = 2
     else:         bucket = 3
 
-    # Normalisation distance pour le modele Nuit
+    # co2_par_km normalisé (pour enjeu 2 sous-desserte)
+    co2_par_km_brut = 0.014  # 14 g/km = 0.014 kg/km (constante ADEME)
     if SCALER is not None:
-        df_scale = pd.DataFrame([[d, 0.014]], columns=['distance_km', 'co2_par_km'])
-        scaled   = SCALER.transform(df_scale)
-        d_scaled = float(scaled[0][0])
+        df_scale    = pd.DataFrame([[d, co2_par_km_brut]],
+                                   columns=['distance_km', 'co2_par_km'])
+        scaled      = SCALER.transform(df_scale)
+        co2_par_km_scaled = float(scaled[0][1])
     else:
-        d_scaled = (d - 86.52) / 107.65  # fallback manuel
+        co2_par_km_scaled = 0.0
 
-    # ENJEU 1 
+    # ── ENJEU 1 — CO2 ──────────────────────────────────────
     features_co2 = pd.DataFrame([[
         operateur_enc, ts_enc, tl_enc,
-        heure_sin, heure_cos, bucket
+        pays_enc, heure_sin, heure_cos, bucket
     ]], columns=[
         'operateur_enc', 'type_service_enc', 'type_ligne_enc',
-        'heure_sin', 'heure_cos', 'distance_bucket_enc'
+        'pays_enc', 'heure_sin', 'heure_cos', 'distance_bucket_enc'
     ])
 
-    # ENJEU 2 
-    features_nuit = pd.DataFrame([[
-        d_scaled, bucket, operateur_enc, tl_enc
+    # ── ENJEU 2 — SOUS-DESSERTE ─────────────────────────────
+    features_des = pd.DataFrame([[
+        operateur_enc, pays_enc, tl_enc,
+        heure_sin, heure_cos, co2_par_km_scaled
     ]], columns=[
-        'distance_km', 'distance_bucket_enc',
-        'operateur_enc', 'type_ligne_enc'
+        'operateur_enc', 'pays_enc', 'type_ligne_enc',
+        'heure_sin', 'heure_cos', 'co2_par_km'
     ])
 
     try:
-        co2_pred  = float(MODEL_CO2.predict(features_co2)[0])
-        nuit_pred = int(MODEL_NUIT.predict(features_nuit)[0])
+        with ml_prediction_latency.labels(modele="co2").time():
+            co2_pred = float(MODEL_CO2.predict(features_co2)[0])
+        ml_predictions_total.labels(modele="co2").inc()
+
+        with ml_prediction_latency.labels(modele="desserte").time():
+            des_pred = int(MODEL_DES.predict(features_des)[0])
+        ml_predictions_total.labels(modele="desserte").inc()
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erreur prediction : {str(e)}")
 
-    type_pred = "Nuit" if nuit_pred == 1 else "Jour"
     co2_avion = req.distance_km * 258 / 1000
     economie  = (co2_avion - co2_pred) / co2_avion * 100 if co2_avion > 0 else 0
     ratio     = co2_avion / co2_pred if co2_pred > 0 else 18.4
 
     return PredictResponse(
-        co2_prediction_kg       = round(co2_pred, 4),
-        type_service_prediction = type_pred,
-        co2_avion_kg            = round(co2_avion, 3),
-        economie_pct            = round(economie, 2),
-        ratio_avion_train       = round(ratio, 2),
-        modele_co2              = type(MODEL_CO2).__name__,
-        modele_classification   = type(MODEL_NUIT).__name__,
+        co2_prediction_kg   = round(co2_pred, 4),
+        co2_avion_kg        = round(co2_avion, 3),
+        economie_pct        = round(economie, 2),
+        ratio_avion_train   = round(ratio, 2),
+        modele_co2          = type(MODEL_CO2).__name__,
+        sous_desserte_pred  = des_pred,
+        sous_desserte_label = "Fragile" if des_pred == 1 else "Normal",
+        modele_desserte     = type(MODEL_DES).__name__,
     )
-

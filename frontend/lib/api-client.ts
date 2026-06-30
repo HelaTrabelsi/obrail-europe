@@ -69,6 +69,18 @@ export interface HealthStatus {
   nb_trains: number
 }
 
+// ── Réponse /predict — 2 enjeux (CO2 + Sous-desserte) ──
+export interface PredictResponse {
+  co2_prediction_kg:   number
+  co2_avion_kg:        number
+  economie_pct:        number
+  ratio_avion_train:   number
+  modele_co2:          string
+  sous_desserte_pred:  number   // 0 = Normal, 1 = Fragile
+  sous_desserte_label: string   // "Normal" | "Fragile"
+  modele_desserte:     string
+}
+
 async function apiFetch<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(`${API_URL}${path}`)
   if (params) {
@@ -96,7 +108,6 @@ export async function getHealth(): Promise<HealthStatus> {
   return apiFetch<HealthStatus>('/health')
 }
 
-// Limite par dÃ©faut Ã  50 pour Ã©viter de surcharger le navigateur
 export async function getTrainsFromAPI(params?: {
   gare?: string
   gare_depart?: string
@@ -108,7 +119,6 @@ export async function getTrainsFromAPI(params?: {
   limit?: number
 }): Promise<Train[]> {
   const { gare_depart, gare_arrivee, ...rest } = params || {}
-  // Si gare_depart ou gare_arrivee â†’ utilise le champ gare de l'API
   const gare = gare_depart || gare_arrivee || rest.gare
   const trains = await apiFetch<Train[]>('/dessertes/search', {
     limit: 50,
@@ -118,8 +128,9 @@ export async function getTrainsFromAPI(params?: {
   return normalizeTrains(trains)
 }
 
-// RÃ©cupÃ¨re la liste des gares disponibles
-export async function getGaresFromAPI(nom?: string): Promise<{ id_gare: number; nom: string; pays: string }[]> {
+export async function getGaresFromAPI(
+  nom?: string
+): Promise<{ id_gare: number; nom: string; pays: string }[]> {
   return apiFetch('/gares', nom ? { nom } : {})
 }
 
@@ -141,4 +152,20 @@ export async function getStatsQualiteFromAPI(): Promise<StatsQualite> {
 
 export async function getStatsCouvertureFromAPI() {
   return apiFetch('/stats/couverture')
+}
+
+export async function predictFromAPI(params: {
+  distance_km: number
+  operateur: string
+  type_service: string
+  type_ligne: string
+  heure_depart: string
+}): Promise<PredictResponse> {
+  const res = await fetch(`${API_URL}/predict`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(`API error ${res.status}: /predict`)
+  return res.json()
 }

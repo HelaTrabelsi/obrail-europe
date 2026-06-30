@@ -3,8 +3,8 @@
 import { useEffect, useState } from 'react'
 import { TopNav } from '@/components/dashboard/top-nav'
 import {
-  getOperateursFromAPI, getStatsFromAPI, getTrainsFromAPI,
-  type Operateur, type Stats, type Train
+  getOperateursFromAPI, getStatsFromAPI, getTrainsFromAPI, predictFromAPI,
+  type Operateur, type Stats, type Train, type PredictResponse
 } from '@/lib/api-client'
 
 const API = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
@@ -20,41 +20,42 @@ function calcCO2(d: number) {
   }
 }
 
-function scoreSubstitution(d: number) {
-  if (d < 50)  return { score: 20, label: 'Non applicable',  color: '#6b7280', desc: 'Distance trop courte — modes doux recommandés' }
-  if (d < 200) return { score: 95, label: 'Très favorable',  color: '#00c98d', desc: 'Le train est plus rapide porte-à-porte que l\'avion' }
-  if (d < 500) return { score: 88, label: 'Favorable',       color: '#00c98d', desc: 'Économie CO₂ de 94,6 % — alternative directe' }
-  if (d < 900) return { score: 70, label: 'Favorable',       color: '#f59e0b', desc: 'Train de nuit recommandé sur ce corridor' }
-  return        { score: 35, label: 'Limité',        color: '#ef4444', desc: 'Distance élevée — compétitivité réduite' }
+interface SousDesserteZone {
+  gare: string
+  pays: string
+  operateur_principal: string
+  nb_trains: number
+  dist_moy_km: number
+}
+interface SousDesserteData {
+  total_gares: number
+  gares_fragiles: number
+  pct_fragile: number
+  zones: SousDesserteZone[]
 }
 
-interface SousDesserteZone { gare: string; pays: string; operateur_principal: string; nb_trains: number; dist_moy_km: number }
-interface SousDesserteData { total_gares: number; gares_fragiles: number; pct_fragile: number; zones: SousDesserteZone[] }
-interface PredictResult { co2_prediction_kg: number; co2_avion_kg: number; economie_pct: number; ratio_avion_train: number; type_service_prediction: string }
-
-// Exemples de prédictions pour les 3 enjeux
+// Exemples de prédictions pour les 2 enjeux
 const PREDICT_EXAMPLES = [
-  { label: 'Paris → Lyon',   distance_km: 392,  operateur: 'SNCF',         type_service: 'Jour', type_ligne: 'national',  heure_depart: '08:30:00' },
-  { label: 'Paris → Berlin', distance_km: 878,  operateur: 'Deutsche Bahn',type_service: 'Nuit', type_ligne: 'national',  heure_depart: '22:00:00' },
-  { label: 'Bruxelles → Paris', distance_km: 265, operateur: 'SNCB',       type_service: 'Jour', type_ligne: 'national',  heure_depart: '07:15:00' },
+  { label: 'Paris → Lyon',      distance_km: 392, operateur: 'SNCF',          type_service: 'Jour', type_ligne: 'national',  heure_depart: '08:30:00' },
+  { label: 'Paris → Berlin',    distance_km: 878, operateur: 'Deutsche Bahn', type_service: 'Nuit', type_ligne: 'national',  heure_depart: '22:00:00' },
+  { label: 'Bruxelles → Paris', distance_km: 265, operateur: 'SNCB',          type_service: 'Jour', type_ligne: 'national',  heure_depart: '07:15:00' },
 ]
 
 export default function StatistiquesPage() {
-  const [operators, setOperators] = useState<Operateur[]>([])
-  const [stats, setStats]         = useState<Stats | null>(null)
-  const [trains, setTrains]       = useState<Train[]>([])
+  const [operators, setOperators]             = useState<Operateur[]>([])
+  const [stats, setStats]                     = useState<Stats | null>(null)
+  const [trains, setTrains]                   = useState<Train[]>([])
   const [sousDesserteData, setSousDesserteData] = useState<SousDesserteData | null>(null)
-  const [loading, setLoading]     = useState(true)
-  const [apiStatus, setApiStatus] = useState(false)
-  const [predictResults, setPredictResults] = useState<(PredictResult | null)[]>([null, null, null])
-  const [predictLoading, setPredictLoading] = useState(false)
+  const [loading, setLoading]                 = useState(true)
+  const [apiStatus, setApiStatus]             = useState(false)
+  const [predictResults, setPredictResults]   = useState<(PredictResponse | null)[]>([null, null, null])
+  const [predictLoading, setPredictLoading]   = useState(false)
 
   // Simulateur
-  const [distance, setDistance] = useState(392)
+  const [distance, setDistance]   = useState(392)
   const [operateur, setOperateur] = useState('SNCF')
-  const [co2, setCo2]   = useState(calcCO2(392))
-  const [subst, setSubst] = useState(scoreSubstitution(392))
-  const [simResult, setSimResult] = useState<PredictResult | null>(null)
+  const [co2, setCo2]             = useState(calcCO2(392))
+  const [simResult, setSimResult] = useState<PredictResponse | null>(null)
   const [simLoading, setSimLoading] = useState(false)
 
   useEffect(() => {
@@ -79,13 +80,8 @@ export default function StatistiquesPage() {
       setPredictLoading(true)
       const results = await Promise.all(
         PREDICT_EXAMPLES.map(async ex => {
-          try {
-            const res = await fetch(`${API}/predict`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(ex)
-            })
-            return res.ok ? await res.json() : null
-          } catch { return null }
+          try { return await predictFromAPI(ex) }
+          catch { return null }
         })
       )
       setPredictResults(results)
@@ -94,27 +90,35 @@ export default function StatistiquesPage() {
     loadPredictions()
   }, [])
 
-  useEffect(() => { setCo2(calcCO2(distance)); setSubst(scoreSubstitution(distance)) }, [distance])
+  useEffect(() => { setCo2(calcCO2(distance)) }, [distance])
 
   async function handlePredict() {
     setSimLoading(true)
     try {
-      const res = await fetch(`${API}/predict`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ distance_km: distance, operateur, type_service: 'Jour', type_ligne: distance > 150 ? 'national' : 'regional', heure_depart: '08:30:00' })
+      const result = await predictFromAPI({
+        distance_km:  distance,
+        operateur,
+        type_service: 'Jour',
+        type_ligne:   distance > 150 ? 'national' : 'regional',
+        heure_depart: '08:30:00',
       })
-      if (res.ok) setSimResult(await res.json())
+      setSimResult(result)
     } catch {}
     finally { setSimLoading(false) }
   }
 
   const heureHist = (() => {
     const h = Array(24).fill(0)
-    trains.forEach(t => { const hr = parseInt(t.heure_depart?.split(':')[0] || '0') % 24; if (!isNaN(hr)) h[hr]++ })
+    trains.forEach(t => {
+      const hr = parseInt(t.heure_depart?.split(':')[0] || '0') % 24
+      if (!isNaN(hr)) h[hr]++
+    })
     return h
   })()
   const maxH = Math.max(...heureHist, 1)
-  const distMoyOp: Record<string, number> = { 'Deutsche Bahn': 85.85, 'SNCB': 59.76, 'SNCF': 117.19 }
+  const distMoyOp: Record<string, number> = {
+    'Deutsche Bahn': 85.85, 'SNCB': 59.76, 'SNCF': 117.19
+  }
 
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
@@ -156,18 +160,28 @@ export default function StatistiquesPage() {
           </div>
         )}
 
-        {/* ── SECTION 0 : Modèles ML ── */}
+        {/* ── SECTION 0 : 2 Modèles ML ── */}
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
           Modèles de Machine Learning — Résultats sur le jeu de test
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
           {[
-            { n: 'Enjeu 1 — Régression CO₂', algo: 'XGBoost', metric: 'R²', val: '0,8828', bar: 88,
-              color: '#00c98d', desc: 'Prédit les émissions CO₂ (kg) d\'un trajet sans data leakage', features: 'opérateur, service, ligne, heure sin/cos, catégorie distance' },
-            { n: 'Enjeu 2 — Substitution avion→train', algo: 'Random Forest', metric: 'F1', val: '0,5925', bar: 59,
-              color: '#0096d6', desc: 'Classifie les lignes candidates à la substitution avion par train', features: 'distance normalisée, opérateur, type ligne, catégorie distance' },
-            { n: 'Enjeu 3 — Zones sous-desservies', algo: 'Logistic Regression', metric: 'AUC', val: '0,7267', bar: 73,
-              color: '#f59e0b', desc: 'Détecte les gares fragiles prioritaires pour le financement TEN-T', features: 'opérateur, pays, type ligne, CO₂/km' },
+            {
+              n: 'Enjeu 1 — Régression CO₂',
+              algo: 'Random Forest',
+              metric: 'R²', val: '0,8592', bar: 86,
+              color: '#00c98d',
+              desc: 'Prédit les émissions CO₂ (kg) d\'un trajet ferroviaire sans data leakage',
+              features: 'opérateur, service, ligne, pays, heure sin/cos, catégorie distance',
+            },
+            {
+              n: 'Enjeu 2 — Zones sous-desservies',
+              algo: 'Logistic Regression',
+              metric: 'AUC', val: '0,7410', bar: 74,
+              color: '#f59e0b',
+              desc: 'Détecte les gares fragiles prioritaires pour le financement TEN-T',
+              features: 'opérateur, pays, type ligne, heure sin/cos, CO₂/km',
+            },
           ].map(m => (
             <div key={m.n} className="rounded-xl border border-border/50 bg-card p-5">
               <div className="flex items-start justify-between mb-3">
@@ -181,12 +195,22 @@ export default function StatistiquesPage() {
                 </div>
               </div>
               <div className="w-full bg-muted/20 rounded-sm h-2 mb-3">
-                <div className="h-2 rounded-sm transition-all" style={{ width: `${m.bar}%`, backgroundColor: m.color }} />
+                <div className="h-2 rounded-sm transition-all"
+                  style={{ width: `${m.bar}%`, backgroundColor: m.color }} />
               </div>
               <p className="text-[11px] text-muted-foreground mb-2">{m.desc}</p>
               <p className="text-[10px] text-muted-foreground/60">Features : {m.features}</p>
             </div>
           ))}
+        </div>
+
+        {/* Note sur l'enjeu écarté */}
+        <div className="rounded-lg border border-border/30 bg-muted/5 px-4 py-3 mb-8 text-[11px] text-muted-foreground">
+          <span className="font-semibold text-foreground">Enjeu écarté — </span>
+          La classification Jour/Nuit (substitution avion→train) a été explorée mais écartée :
+          sans l'heure de départ comme feature (pour éviter le data leakage), le F1 est
+          plafonné à 0,59 sur tous les algorithmes. Les données GTFS statiques ne permettent
+          pas d'améliorer ce score. La sous-desserte couvre mieux la mission TEN-T d'ObRail.
         </div>
 
         {/* ── SECTION 0b : Prédictions live ── */}
@@ -195,7 +219,9 @@ export default function StatistiquesPage() {
         </h2>
         <div className="rounded-xl border border-border/50 bg-card p-5 mb-8">
           <p className="text-[11px] text-muted-foreground mb-4">
-            Résultats obtenus via <code className="bg-muted/30 px-1 rounded text-[10px]">POST /predict</code> — modèles XGBoost (CO₂) + Random Forest (substitution) · Split test 70/15/15 · CV 5-fold
+            Résultats via{' '}
+            <code className="bg-muted/30 px-1 rounded text-[10px]">POST /predict</code> —
+            Enjeu 1 : Random Forest (CO₂, R²=0,86) · Enjeu 2 : Logistic Regression (Sous-desserte, AUC=0,74)
           </p>
           {predictLoading ? (
             <p className="text-sm text-muted-foreground">Chargement des prédictions...</p>
@@ -206,7 +232,9 @@ export default function StatistiquesPage() {
                 return (
                   <div key={ex.label} className="rounded-lg border border-border/30 bg-muted/5 p-4">
                     <p className="text-sm font-semibold text-foreground mb-1">{ex.label}</p>
-                    <p className="text-[11px] text-muted-foreground mb-3">{ex.distance_km} km · {ex.operateur} · {ex.type_service}</p>
+                    <p className="text-[11px] text-muted-foreground mb-3">
+                      {ex.distance_km} km · {ex.operateur} · {ex.type_service}
+                    </p>
                     {r ? (
                       <div className="space-y-1.5">
                         <div className="flex justify-between text-[11px]">
@@ -226,11 +254,13 @@ export default function StatistiquesPage() {
                           <span className="font-mono text-foreground">{r.ratio_avion_train}×</span>
                         </div>
                         <div className="flex justify-between text-[11px] pt-1 border-t border-border/20">
-                          <span className="text-muted-foreground">Substitution</span>
+                          <span className="text-muted-foreground">Desserte</span>
                           <span className={`font-semibold text-[10px] px-1.5 py-0.5 rounded-full ${
-                            r.economie_pct > 90 ? 'bg-primary/20 text-primary' : 'bg-amber-500/20 text-amber-500'
+                            r.sous_desserte_pred === 0
+                              ? 'bg-primary/20 text-primary'
+                              : 'bg-amber-500/20 text-amber-500'
                           }`}>
-                            {r.economie_pct > 90 ? 'Prioritaire' : 'Favorable'}
+                            {r.sous_desserte_label}
                           </span>
                         </div>
                       </div>
@@ -255,16 +285,16 @@ export default function StatistiquesPage() {
             <div className="flex items-end gap-px h-14" role="img" aria-label="Histogramme départs par heure">
               {heureHist.map((v, i) => (
                 <div key={i} className="flex-1 rounded-sm"
-                  style={{ height: `${(v / maxH) * 56}px`, backgroundColor: (i < 6 || i >= 20) ? '#6366f1aa' : '#00c98daa' }}
-                  title={`${i}h : ${v} trains`} />
+                  style={{
+                    height: `${(v / maxH) * 56}px`,
+                    backgroundColor: (i < 6 || i >= 20) ? '#6366f1aa' : '#00c98daa',
+                  }}
+                  title={`${i}h : ${v} trains`}
+                />
               ))}
             </div>
             <div className="flex justify-between text-[9px] text-muted-foreground mt-1">
               <span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span>
-            </div>
-            <div className="flex gap-4 mt-3 text-[11px] text-muted-foreground">
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-primary/70 inline-block" />Jour</span>
-              <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-indigo-500/70 inline-block" />Nuit</span>
             </div>
           </div>
 
@@ -281,12 +311,10 @@ export default function StatistiquesPage() {
                       <span className="font-mono text-muted-foreground">{op.nb_trains.toLocaleString()}</span>
                     </div>
                     <div className="w-full bg-muted/20 rounded-sm h-4">
-                      <div className="h-4 rounded-sm" style={{ width: `${pct}%`, backgroundColor: colors[i] }} />
+                      <div className="h-4 rounded-sm"
+                        style={{ width: `${pct}%`, backgroundColor: colors[i] }} />
                     </div>
-                    <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
-                      <span>{pct.toFixed(0)} %</span>
-                      <span>CO₂ moy. {((distMoyOp[op.nom] || 86) * 14 / 1000).toFixed(2)} kg/train</span>
-                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">{pct.toFixed(0)} %</p>
                   </div>
                 )
               })}
@@ -305,7 +333,9 @@ export default function StatistiquesPage() {
                     <span className="text-muted-foreground">Nuit</span>
                     <span className="font-mono text-right">{op.nb_nuit.toLocaleString()}</span>
                     <span className="text-muted-foreground">% Nuit</span>
-                    <span className="font-mono text-right">{((op.nb_nuit / op.nb_trains) * 100).toFixed(1)} %</span>
+                    <span className="font-mono text-right">
+                      {((op.nb_nuit / op.nb_trains) * 100).toFixed(1)} %
+                    </span>
                   </div>
                 </div>
               ))}
@@ -313,19 +343,23 @@ export default function StatistiquesPage() {
           </div>
         </div>
 
-        {/* ── SECTION 2 : Simulateur CO2 avec /predict live ── */}
+        {/* ── SECTION 2 : Simulateur CO2 ── */}
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Simulateur d'impact carbone — Modèle XGBoost via /predict
+          Simulateur d'impact carbone — Modèle Random Forest via /predict
         </h2>
         <div className="rounded-xl border border-border/50 bg-card p-6 mb-8">
           <p className="text-sm text-muted-foreground mb-6">
-            Estimez l'empreinte carbone d'un trajet et évaluez sa pertinence comme alternative à l'avion.
-            Le bouton <strong className="text-foreground">Prédire</strong> appelle le modèle XGBoost (R²=0,88) en production.
+            Estimez l'empreinte carbone d'un trajet et obtenez l'analyse de desserte.
+            Le bouton <strong className="text-foreground">Prédire</strong> appelle le modèle
+            Random Forest (R²=0,86) en production.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
             <div className="md:col-span-2">
               <div className="flex justify-between mb-1">
-                <label htmlFor="sim-dist" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Distance du trajet</label>
+                <label htmlFor="sim-dist"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Distance du trajet
+                </label>
                 <span className="text-sm font-mono font-semibold text-foreground">{distance} km</span>
               </div>
               <input id="sim-dist" type="range" min={1} max={2000} value={distance}
@@ -337,48 +371,41 @@ export default function StatistiquesPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <label htmlFor="sim-op" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">Opérateur</label>
-                <select id="sim-op" value={operateur} onChange={e => { setOperateur(e.target.value); setSimResult(null) }}
+                <label htmlFor="sim-op"
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block mb-2">
+                  Opérateur
+                </label>
+                <select id="sim-op" value={operateur}
+                  onChange={e => { setOperateur(e.target.value); setSimResult(null) }}
                   className="w-full bg-muted/20 border border-border/50 rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary">
-                  <option>SNCF</option><option>Deutsche Bahn</option><option>SNCB</option>
+                  <option>SNCF</option>
+                  <option>Deutsche Bahn</option>
+                  <option>SNCB</option>
                 </select>
               </div>
               <button onClick={handlePredict} disabled={simLoading}
                 className="w-full flex items-center justify-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors">
-                {simLoading ? 'Prédiction...' : 'Prédire via XGBoost'}
+                {simLoading ? 'Prédiction...' : 'Prédire via Random Forest'}
               </button>
             </div>
           </div>
 
+          {/* Barres CO2 */}
           <div className="grid grid-cols-3 gap-3 mb-5">
             {[
-              { l: 'Train (14 g/km)',    v: simResult ? simResult.co2_prediction_kg : co2.train,   c: 'text-primary', badge: simResult ? 'ML' : null },
-              { l: 'Avion (258 g/km)',   v: simResult ? simResult.co2_avion_kg      : co2.avion,   c: 'text-foreground', badge: null },
-              { l: 'Voiture (193 g/km)', v: co2.voiture, c: 'text-foreground', badge: null },
+              { l: 'Train (14 g/km)',     v: simResult ? simResult.co2_prediction_kg : co2.train,   c: 'text-primary',    badge: simResult ? 'ML' : null },
+              { l: 'Avion (258 g/km)',    v: simResult ? simResult.co2_avion_kg      : co2.avion,   c: 'text-foreground', badge: null },
+              { l: 'Voiture (193 g/km)', v: co2.voiture,                                            c: 'text-foreground', badge: null },
             ].map(item => (
               <div key={item.l} className="rounded-lg border border-border/50 bg-muted/10 p-4 text-center relative">
-                {item.badge && <span className="absolute top-2 right-2 text-[9px] bg-primary/20 text-primary px-1 rounded font-bold">{item.badge}</span>}
+                {item.badge && (
+                  <span className="absolute top-2 right-2 text-[9px] bg-primary/20 text-primary px-1 rounded font-bold">
+                    {item.badge}
+                  </span>
+                )}
                 <p className="text-[11px] text-muted-foreground mb-1">{item.l}</p>
                 <p className={`text-2xl font-bold font-mono ${item.c}`}>{item.v}</p>
                 <p className="text-[11px] text-muted-foreground mt-0.5">kg CO₂</p>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-2 mb-5">
-            {[
-              { l: 'Train',   v: simResult ? simResult.co2_prediction_kg : co2.train,   max: simResult ? simResult.co2_avion_kg : co2.avion, color: '#00c98d' },
-              { l: 'Voiture', v: co2.voiture, max: simResult ? simResult.co2_avion_kg : co2.avion, color: '#f59e0b' },
-              { l: 'Avion',   v: simResult ? simResult.co2_avion_kg : co2.avion, max: simResult ? simResult.co2_avion_kg : co2.avion, color: '#ef4444' },
-            ].map(b => (
-              <div key={b.l} className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground w-14 shrink-0">{b.l}</span>
-                <div className="flex-1 bg-muted/20 rounded-sm h-5">
-                  <div className="h-5 rounded-sm transition-all duration-300 flex items-center justify-end pr-2"
-                    style={{ width: `${Math.min((b.v / b.max) * 100, 100)}%`, backgroundColor: b.color }}>
-                    <span className="text-[10px] font-semibold text-white">{b.v} kg</span>
-                  </div>
-                </div>
               </div>
             ))}
           </div>
@@ -398,95 +425,42 @@ export default function StatistiquesPage() {
             </div>
           </div>
 
-          <div className="rounded-lg border border-border/50 bg-muted/5 p-4">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <p className="text-sm font-semibold text-foreground">Score de substitution avion→train</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{subst.desc}</p>
+          {/* Résultat desserte si dispo */}
+          {simResult && (
+            <div className="rounded-lg border border-border/50 bg-muted/5 p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Analyse de desserte</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Modèle : {simResult.modele_desserte} — AUC=0,74
+                  </p>
+                </div>
+                <span className={`font-bold text-sm px-3 py-1.5 rounded-full ${
+                  simResult.sous_desserte_pred === 0
+                    ? 'bg-primary/20 text-primary'
+                    : 'bg-amber-500/20 text-amber-500'
+                }`}>
+                  {simResult.sous_desserte_label}
+                </span>
               </div>
-              <div className="text-right shrink-0 ml-4">
-                <p className="text-[10px] text-muted-foreground">Score</p>
-                <p className="text-xl font-bold font-mono text-foreground">{subst.score}<span className="text-sm font-normal">/100</span></p>
-              </div>
+              <p className="text-[11px] text-muted-foreground mt-2">
+                {simResult.sous_desserte_pred === 0
+                  ? 'Liaison correctement desservie — pas de signalement prioritaire TEN-T'
+                  : 'Liaison potentiellement fragile — candidate au financement TEN-T'}
+              </p>
             </div>
-            <div className="w-full bg-muted/20 rounded-sm h-2 mb-2">
-              <div className="h-2 rounded-sm bg-primary transition-all duration-300" style={{ width: `${subst.score}%` }} />
-            </div>
-            <p className="text-[11px] text-muted-foreground">
-              Évaluation : <strong className="text-foreground">{subst.label}</strong> ·
-              Source : ObRail Europe · Facteurs ADEME 2023 · Programme TEN-T
-            </p>
-          </div>
+          )}
         </div>
 
-        {/* ── SECTION 3 : Substitution avion→train par opérateur ── */}
+        {/* ── SECTION 3 : Zones sous-desservies ── */}
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Lignes candidates à la substitution avion→train — Enjeu 2 (Random Forest, F1=0,59)
-        </h2>
-        <div className="rounded-xl border border-border/50 bg-card overflow-hidden mb-8">
-          <table className="w-full text-sm" role="table">
-            <thead>
-              <tr className="border-b border-border/40 bg-muted/10">
-                {['Opérateur','Trains total','Trains de jour','Trains de nuit','% Nuit','Distance moy.','Score substitution'].map(h => (
-                  <th key={h} className="px-5 py-3 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {operators.map((op, i) => {
-                const pctNuit = (op.nb_nuit / op.nb_trains) * 100
-                const distMoy = distMoyOp[op.nom] || 86
-                const score = scoreSubstitution(distMoy)
-                return (
-                  <tr key={op.nom} className={`border-b border-border/20 ${i % 2 === 0 ? '' : 'bg-muted/5'}`}>
-                    <td className="px-5 py-3 font-semibold text-foreground">{op.nom}</td>
-                    <td className="px-5 py-3 font-mono">{op.nb_trains.toLocaleString()}</td>
-                    <td className="px-5 py-3 font-mono">{op.nb_jour.toLocaleString()}</td>
-                    <td className="px-5 py-3 font-mono">{op.nb_nuit.toLocaleString()}</td>
-                    <td className="px-5 py-3 font-mono">{pctNuit.toFixed(1)} %</td>
-                    <td className="px-5 py-3 font-mono">{distMoy.toFixed(0)} km</td>
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 bg-muted/20 rounded-sm h-1.5">
-                          <div className="h-1.5 rounded-sm bg-primary" style={{ width: `${score.score}%` }} />
-                        </div>
-                        <span className="text-[11px] font-semibold" style={{ color: score.color }}>{score.score}/100</span>
-                        <span className="text-[10px] text-muted-foreground">{score.label}</span>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-              {stats && (
-                <tr className="bg-muted/10 border-t border-border/40 font-semibold">
-                  <td className="px-5 py-3">Total réseau</td>
-                  <td className="px-5 py-3 font-mono">{stats.nb_trains.toLocaleString()}</td>
-                  <td className="px-5 py-3 font-mono">{stats.nb_jour.toLocaleString()}</td>
-                  <td className="px-5 py-3 font-mono">{stats.nb_nuit.toLocaleString()}</td>
-                  <td className="px-5 py-3 font-mono">{((stats.nb_nuit / stats.nb_trains) * 100).toFixed(1)} %</td>
-                  <td className="px-5 py-3 font-mono">{stats.distance_moyenne_km?.toFixed(0)} km</td>
-                  <td className="px-5 py-3 text-[11px] text-muted-foreground">—</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <div className="px-5 py-3 border-t border-border/20 bg-muted/5">
-            <p className="text-[11px] text-muted-foreground">
-              Observation : SNCF (117 km de distance moyenne) présente le score de substitution le plus élevé.
-              Deutsche Bahn opère {operators.find(o => o.nom === 'Deutsche Bahn') ? ((operators.find(o => o.nom === 'Deutsche Bahn')!.nb_nuit / operators.find(o => o.nom === 'Deutsche Bahn')!.nb_trains) * 100).toFixed(1) : '17,9'} % de trains de nuit
-              — un modèle à reproduire pour SNCF dans le cadre du programme TEN-T.
-            </p>
-          </div>
-        </div>
-
-        {/* ── SECTION 4 : Zones sous-desservies ── */}
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">
-          Zones sous-desservies — Enjeu 3 (Régression Logistique, AUC=0,73)
+          Zones sous-desservies — Enjeu 2 (Logistic Regression, AUC=0,7410)
         </h2>
         <div className="rounded-xl border border-border/50 bg-card p-6 mb-8">
           <p className="text-sm text-muted-foreground mb-4">
-            Une liaison est considérée fragile si elle présente ≤3 trains ET une distance moyenne &lt;150 km.
-            Ces zones sont prioritaires pour les financements TEN-T.
+            Une liaison est considérée fragile si elle présente ≤ 3 trains ET une distance
+            moyenne comprise entre 5 et 150 km. Ces zones sont prioritaires pour les
+            financements TEN-T (35,7 milliards d'euros sur 2021-2027).
           </p>
           {sousDesserteData && (
             <div className="grid grid-cols-3 gap-3 mb-5">
@@ -507,8 +481,11 @@ export default function StatistiquesPage() {
               <table className="w-full text-sm" role="table">
                 <thead>
                   <tr className="border-b border-border/40">
-                    {['Gare','Pays','Opérateur','Trains','Dist. moy.','Statut'].map(h => (
-                      <th key={h} className="pb-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{h}</th>
+                    {['Gare', 'Pays', 'Opérateur', 'Trains', 'Dist. moy.', 'Statut'].map(h => (
+                      <th key={h}
+                        className="pb-2 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {h}
+                      </th>
                     ))}
                   </tr>
                 </thead>
@@ -522,7 +499,9 @@ export default function StatistiquesPage() {
                       <td className="py-2 font-mono">{z.dist_moy_km} km</td>
                       <td className="py-2">
                         <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                          z.nb_trains === 1 ? 'bg-red-500/15 text-red-400' : 'bg-amber-500/15 text-amber-500'
+                          z.nb_trains === 1
+                            ? 'bg-red-500/15 text-red-400'
+                            : 'bg-amber-500/15 text-amber-500'
                         }`}>
                           {z.nb_trains === 1 ? 'Critique' : 'Fragile'}
                         </span>
@@ -537,12 +516,13 @@ export default function StatistiquesPage() {
           )}
           <p className="text-[11px] text-muted-foreground mt-4 pt-3 border-t border-border/30">
             Analyse complète sur {sousDesserteData?.total_gares.toLocaleString()} gares ·
-            Modèle : Régression Logistique (AUC=0,73) · Endpoint : /stats/sous-desserte
+            Modèle : Logistic Regression (AUC=0,7410) · Endpoint : /stats/sous-desserte
           </p>
         </div>
 
         <footer className="pt-6 border-t border-border/30 text-center text-[11px] text-muted-foreground/50">
-          ObRail Europe · SNCF · Deutsche Bahn · SNCB · GTFS Open Data · ODbL · ADEME 2023 · Green Deal UE · Programme TEN-T · Bloc E6.2 RNCP36581
+          ObRail Europe · SNCF · Deutsche Bahn · SNCB · GTFS Open Data · ODbL ·
+          ADEME 2023 · Green Deal UE · Programme TEN-T · Bloc E6.2 RNCP36581
         </footer>
       </main>
     </div>

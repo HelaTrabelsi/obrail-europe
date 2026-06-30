@@ -1,7 +1,4 @@
-# ============================================================
-# ObRail Europe — EDA — Bloc E6.2 — RNCP36581
-# Trabelsi Hela · Alpha Oumar Diallo · Vitoux Alexiane
-# ============================================================
+
 # Lancer : python notebooks/01_EDA.py
 # Jupyter : python -m jupytext --to notebook notebooks/01_EDA.py
 

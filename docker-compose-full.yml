@@ -1,5 +1,3 @@
-version: "3.9"
-
 
 # Ports :
 #   5432 - PostgreSQL ObRail
@@ -8,8 +6,9 @@ version: "3.9"
 #   3002 - Frontend React/Next.js
 #   8080 - Airflow UI
 #   9090 - Prometheus
-#   3001 - Grafana 
+#   3001 - Grafana
 
+version: "3.9"
 
 x-airflow-common: &airflow-common
   image: apache/airflow:2.8.0
@@ -34,6 +33,7 @@ x-airflow-common: &airflow-common
 
 services:
 
+  # ── Base de données PostgreSQL 16 ──────────────────────
   db:
     image: postgres:16-alpine
     container_name: obrail_db
@@ -53,57 +53,9 @@ services:
       timeout: 5s
       retries: 5
 
-  airflow_db:
-    image: postgres:16-alpine
-    container_name: obrail_airflow_db
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: airflow
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-    volumes:
-      - airflow_db_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  airflow_init:
-    <<: *airflow-common
-    container_name: obrail_airflow_init
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        pip install psycopg2-binary pandas sqlalchemy python-dotenv requests &&
-        airflow db migrate &&
-        airflow users create \
-          --username admin --password admin \
-          --firstname ObRail --lastname Admin \
-          --role Admin --email admin@obrail.eu
-    restart: "no"
-
-  airflow_webserver:
-    <<: *airflow-common
-    container_name: obrail_airflow_webserver
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    command: webserver
-    depends_on:
-      airflow_init:
-        condition: service_completed_successfully
-
-  airflow_scheduler:
-    <<: *airflow-common
-    container_name: obrail_airflow_scheduler
-    restart: unless-stopped
-    command: scheduler
-    depends_on:
-      airflow_init:
-        condition: service_completed_successfully
-
+  # ── API FastAPI — 13 endpoints + 2 modèles ML ──────────
+  # Enjeu 1 : CO2 (Random Forest R²=0,86)
+  # Enjeu 2 : Sous-desserte (Logistic Regression AUC=0,74)
   api:
     build:
       context: .
@@ -119,14 +71,38 @@ services:
       DB_NAME: obrail_db
       DB_USER: postgres
       DB_PASSWORD: postgres
+    volumes:
+      # Monte les modèles ML depuis la machine hôte
+      # pour permettre le remplacement sans rebuild
+      - ./notebooks/outputs_models:/app/notebooks/outputs_models:ro
+      - ./notebooks/ml_splits:/app/notebooks/ml_splits:ro
     ports:
       - "8000:8000"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
-      retries: 3
+      retries: 5
+      start_period: 15s
 
+  # ── Frontend React/Next.js 16 ──────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    container_name: obrail_frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+    ports:
+      - "3002:3000"
+
+  # ── Dashboard Streamlit ────────────────────────────────
   dashboard:
     build:
       context: .
@@ -148,22 +124,82 @@ services:
     ports:
       - "8501:8501"
 
-  frontend:
+  # ── ETL Pipeline (exécution manuelle ou via Airflow) ───
+  etl:
     build:
       context: .
-      dockerfile: Dockerfile.dashboard
-      args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
-    container_name: obrail_frontend
-    restart: unless-stopped
+      dockerfile: Dockerfile.etl
+    container_name: obrail_etl
+    restart: "no"
     depends_on:
-      api:
+      db:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_API_URL: http://api:8000
-    ports:
-      - "3000:3000"
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: obrail_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    volumes:
+      - ./data:/app/data
+      - ./notebooks:/app/notebooks
 
+  # ── Airflow DB ─────────────────────────────────────────
+  airflow_db:
+    image: postgres:16-alpine
+    container_name: obrail_airflow_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: airflow
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+    volumes:
+      - airflow_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U airflow -d airflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Airflow Init ───────────────────────────────────────
+  airflow_init:
+    <<: *airflow-common
+    container_name: obrail_airflow_init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        pip install psycopg2-binary pandas sqlalchemy python-dotenv requests &&
+        airflow db migrate &&
+        airflow users create \
+          --username admin --password admin \
+          --firstname ObRail --lastname Admin \
+          --role Admin --email admin@obrail.eu
+    restart: "no"
+
+  # ── Airflow Webserver ──────────────────────────────────
+  airflow_webserver:
+    <<: *airflow-common
+    container_name: obrail_airflow_webserver
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    command: webserver
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+
+  # ── Airflow Scheduler ──────────────────────────────────
+  airflow_scheduler:
+    <<: *airflow-common
+    container_name: obrail_airflow_scheduler
+    restart: unless-stopped
+    command: scheduler
+    depends_on:
+      airflow_init:
+        condition: service_completed_successfully
+
+  # ── Prometheus ─────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: obrail_prometheus
@@ -177,6 +213,7 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
 
+  # ── Grafana ────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: obrail_grafana
@@ -187,8 +224,14 @@ services:
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
+      # SMTP désactivé en production — utiliser webhook Grafana pour les alertes
+      # GF_SMTP_ENABLED: "true"
+      # GF_SMTP_HOST: "smtp.gmail.com:587"
+      # GF_SMTP_USER: "${GRAFANA_SMTP_USER}"
+      # GF_SMTP_PASSWORD: "${GRAFANA_SMTP_PASSWORD}"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana-dashboard.json:/etc/grafana/provisioning/dashboards/obrail.json:ro
     ports:
       - "3001:3000"
 

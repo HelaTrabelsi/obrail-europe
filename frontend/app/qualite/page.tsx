@@ -104,12 +104,12 @@ export default function QualitePage() {
           <h3 className="text-sm font-bold text-primary uppercase tracking-wide mb-4">Conformité RGPD</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {[
-              ['✅ Aucune donnée personnelle', 'Horaires, gares, opérateurs uniquement'],
-              ['✅ Licences respectées', 'ODbL · Open License v2 · Creative Commons BY'],
-              ['✅ API read-only', 'GET uniquement — impossible de modifier les données'],
-              ['✅ Traçabilité ETL', 'Table etl_logs — audit complet de chaque chargement'],
-              ['✅ Credentials sécurisés', 'Variables .env non versionnées dans .gitignore'],
-              ['✅ Open Data', 'Données publiques GTFS — réutilisation libre sous licence'],
+              ['Aucune donnée personnelle', 'Horaires, gares, opérateurs uniquement'],
+              ['Licences respectées', 'ODbL · Open License v2 · Creative Commons BY'],
+              ['API read-only', 'GET uniquement — impossible de modifier les données'],
+              ['Traçabilité ETL', 'Table etl_logs — audit complet de chaque chargement'],
+              ['Credentials sécurisés', 'Variables .env non versionnées dans .gitignore'],
+              ['Open Data', 'Données publiques GTFS — réutilisation libre sous licence'],
             ].map(([titre, desc]) => (
               <div key={titre} className="flex gap-3">
                 <div>
