@@ -12,28 +12,16 @@ jobs:
   tests:
     name: Tests automatises (pytest)
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
-
-      - name: Installation Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
-
-      - name: Installation des dependances
-        run: pip install -r requirements.txt pytest pytest-cov httpx
-
-      - name: Execution des tests unitaires
-        run: pytest tests/ -v --tb=short --cov=api --cov-report=term-missing
-
-      - name: Rapport de couverture XML
-        run: pytest tests/ --cov=api --cov-report=xml
-
-      - name: Upload rapport couverture
-        uses: actions/upload-artifact@v4
+      - run: pip install -r requirements.txt pytest pytest-cov httpx
+      - run: pytest tests/ -v --tb=short --cov=api --cov-report=term-missing
+      - run: pytest tests/ --cov=api --cov-report=xml
+      - uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
@@ -43,64 +31,48 @@ jobs:
     name: Build Docker images
     runs-on: ubuntu-latest
     needs: tests
-
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
-
-      - name: Configuration Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build image API
-        run: docker build -f Dockerfile.api -t obrail-api:latest .
-
-      - name: Build image Frontend
-        run: docker build -f Dockerfile.frontend -t obrail-frontend:latest .
-
-      - name: Build image ETL
-        run: docker build -f Dockerfile.etl -t obrail-etl:latest .
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -f Dockerfile.api -t obrail-api:latest .
+      - run: docker build -f Dockerfile.frontend -t obrail-frontend:latest .
+      - run: docker build -f Dockerfile.etl -t obrail-etl:latest .
 
   # ── Job 3 : Integration Docker Compose ─────────────────────
   integration:
     name: Test integration Docker Compose
     runs-on: ubuntu-latest
     needs: build
-
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Demarrage DB et API
         run: docker compose up -d db api
 
-      - name: Attente API disponible (retry 30 x 5s = 150s max)
+      - name: Attente API disponible (retry 30x5s)
         run: |
-          echo "Attente demarrage API..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:8000/health; then
-              echo "API prete apres $((i*5)) secondes"
+              echo "API prete apres $((i*5))s"
               exit 0
             fi
-            echo "Tentative $i/30 - nouvelle tentative dans 5s..."
+            echo "Tentative $i/30..."
             sleep 5
           done
-          echo "ECHEC : API non disponible apres 150 secondes"
-          echo "--- Logs API ---"
           docker compose logs api
-          echo "--- Logs DB ---"
           docker compose logs db
           exit 1
 
-      - name: Verification endpoint /health
+      - name: Verification /health
         run: curl -f http://localhost:8000/health
 
-      - name: Verification endpoint /stats
+      - name: Verification /stats
         run: curl -f http://localhost:8000/stats
 
-      - name: Verification endpoint /operateurs
+      - name: Verification /operateurs
         run: curl -f http://localhost:8000/operateurs
 
-      - name: Arret des services
+      - name: Arret services
         if: always()
         run: docker compose down
 
@@ -109,30 +81,27 @@ jobs:
     name: Tests E2E Playwright
     runs-on: ubuntu-latest
     needs: integration
-
     steps:
-      - name: Checkout du code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Installation Node.js 20
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
 
-      - name: Installation des dependances frontend
+      - name: Installation dependances E2E
+        working-directory: E2E
+        run: npm ci
+
+      - name: Installation Playwright chromium
+        working-directory: E2E
+        run: npx playwright install --with-deps chromium
+
+      - name: Installation dependances frontend
         working-directory: frontend
         run: npm ci
 
-      - name: Installation Playwright + navigateurs
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-
-      - name: Demarrage complet (DB + API + Frontend)
-        run: |
-          docker compose up -d db api dashboard
-          echo "Attente demarrage services..."
+      - name: Demarrage DB et API
+        run: docker compose up -d db api
 
       - name: Attente API disponible
         run: |
@@ -141,25 +110,29 @@ jobs:
               echo "API prete"
               break
             fi
-            echo "Tentative API $i/30..."
             sleep 5
           done
 
-      - name: Attente Frontend disponible
+      - name: Demarrage frontend Next.js sur port 3002
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8000
+        run: npm run dev -- -p 3002 &
+
+      - name: Attente frontend port 3002
         run: |
-          for i in $(seq 1 20); do
-            if curl -sf http://localhost:3000; then
+          for i in $(seq 1 24); do
+            if curl -sf http://localhost:3002; then
               echo "Frontend pret"
               break
             fi
-            echo "Tentative Frontend $i/20..."
+            echo "Attente frontend $i/24..."
             sleep 5
           done
 
-      - name: Execution tests E2E Playwright
-        working-directory: frontend
+      - name: Execution tests E2E
+        working-directory: E2E
         env:
-          PLAYWRIGHT_BASE_URL: http://localhost:3000
           CI: true
         run: npx playwright test --reporter=html
 
@@ -168,7 +141,7 @@ jobs:
         if: always()
         with:
           name: playwright-report
-          path: frontend/playwright-report/
+          path: E2E/playwright-report/
           retention-days: 7
 
       - name: Upload screenshots echecs
@@ -176,8 +149,8 @@ jobs:
         if: failure()
         with:
           name: playwright-screenshots
-          path: frontend/test-results/
+          path: E2E/test-results/
 
-      - name: Arret des services
+      - name: Arret services
         if: always()
         run: docker compose down
