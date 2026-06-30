@@ -369,8 +369,7 @@ def ml_monitoring_latest():
         with get_engine().connect() as c:
             result = c.execute(text("""
                 SELECT run_date, n_observations, co2_moyenne, co2_variance,
-                       substitution_proportion, desserte_proportion,
-                       nb_alertes, alertes_json
+                       desserte_proportion, nb_alertes, alertes_json
                 FROM monitoring_ml_drift
                 ORDER BY run_date DESC
                 LIMIT 1
@@ -387,7 +386,6 @@ def ml_monitoring_latest():
             "n_observations": result["n_observations"],
             "co2_moyenne": round(result["co2_moyenne"], 4),
             "co2_variance": round(result["co2_variance"], 4),
-            "substitution_proportion": round(result["substitution_proportion"], 4),
             "desserte_proportion": round(result["desserte_proportion"], 4),
             "nb_alertes": result["nb_alertes"],
             "alertes": result["alertes_json"],
@@ -408,8 +406,7 @@ def ml_monitoring_history(limit: int = 30):
     try:
         with get_engine().connect() as c:
             results = c.execute(text("""
-                SELECT run_date, co2_moyenne, substitution_proportion,
-                       desserte_proportion, nb_alertes
+                SELECT run_date, co2_moyenne, desserte_proportion, nb_alertes
                 FROM monitoring_ml_drift
                 ORDER BY run_date DESC
                 LIMIT :limit
@@ -420,7 +417,6 @@ def ml_monitoring_history(limit: int = 30):
                 {
                     "run_date": str(r["run_date"]),
                     "co2_moyenne": round(r["co2_moyenne"], 4),
-                    "substitution_proportion": round(r["substitution_proportion"], 4),
                     "desserte_proportion": round(r["desserte_proportion"], 4),
                     "nb_alertes": r["nb_alertes"],
                 }
@@ -488,7 +484,7 @@ def predict(req: PredictRequest):
     elif d < 600: bucket = 2
     else:         bucket = 3
 
-    # co2_par_km normalisé (pour enjeu 2 sous-desserte)
+    # co2_par_km normalisé pour le modele de sous-desserte
     co2_par_km_brut = 0.014  # 14 g/km = 0.014 kg/km (constante ADEME)
     if SCALER is not None:
         df_scale    = pd.DataFrame([[d, co2_par_km_brut]],
@@ -498,21 +494,21 @@ def predict(req: PredictRequest):
     else:
         co2_par_km_scaled = 0.0
 
-    # ── ENJEU 1 — CO2 ──────────────────────────────────────
+    # ── ENJEU 1 — CO2 ──
     features_co2 = pd.DataFrame([[
-        operateur_enc, ts_enc, tl_enc,
-        pays_enc, heure_sin, heure_cos, bucket
+        bucket, operateur_enc, ts_enc,
+        heure_sin, heure_cos
     ]], columns=[
-        'operateur_enc', 'type_service_enc', 'type_ligne_enc',
-        'pays_enc', 'heure_sin', 'heure_cos', 'distance_bucket_enc'
+        'distance_bucket_enc', 'operateur_enc', 'type_service_enc',
+        'heure_sin', 'heure_cos'
     ])
 
-    # ── ENJEU 2 — SOUS-DESSERTE ─────────────────────────────
+    # ── ENJEU 2 — SOUS-DESSERTE  ──
     features_des = pd.DataFrame([[
-        operateur_enc, pays_enc, tl_enc,
+        operateur_enc, pays_enc,
         heure_sin, heure_cos, co2_par_km_scaled
     ]], columns=[
-        'operateur_enc', 'pays_enc', 'type_ligne_enc',
+        'operateur_enc', 'pays_enc',
         'heure_sin', 'heure_cos', 'co2_par_km'
     ])
 

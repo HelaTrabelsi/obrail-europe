@@ -33,9 +33,8 @@ BASELINE_FILE = "notebooks/outputs_models/baseline_drift.json"
 DB_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/obrail_db")
 
 # Seuils d'alerte (% d'ecart toleres avant declenchement)
-SEUIL_ALERTE_MOYENNE_CO2 = 0.20      # +/- 20% de variation moyenne CO2 predite
-SEUIL_ALERTE_VARIANCE_CO2 = 0.30     # +/- 30% de variation de variance
-SEUIL_ALERTE_PROPORTION_NUIT = 0.15  # +/- 15 points de pourcentage classe Nuit
+SEUIL_ALERTE_MOYENNE_CO2 = 0.20         # +/- 20% de variation moyenne CO2 predite
+SEUIL_ALERTE_VARIANCE_CO2 = 0.30        # +/- 30% de variation de variance
 SEUIL_ALERTE_PROPORTION_FRAGILE = 0.10  # +/- 10 points de pourcentage gares fragiles
 
 
@@ -56,10 +55,9 @@ def sauvegarder_baseline(stats):
     print(f"✓ Baseline sauvegardee : {BASELINE_FILE}")
 
 
-def calculer_stats_predictions(model_co2, model_subst, model_des, X_co2, X_subst, X_des):
+def calculer_stats_predictions(model_co2, model_des, X_co2, X_des):
     """Calcule les statistiques agregees des predictions actuelles."""
     pred_co2 = model_co2.predict(X_co2)
-    pred_subst = model_subst.predict(X_subst)
     pred_des = model_des.predict(X_des)
 
     return {
@@ -69,7 +67,6 @@ def calculer_stats_predictions(model_co2, model_subst, model_des, X_co2, X_subst
         "co2_variance": float(np.var(pred_co2)),
         "co2_min": float(np.min(pred_co2)),
         "co2_max": float(np.max(pred_co2)),
-        "substitution_proportion_classe_1": float(np.mean(pred_subst)),
         "desserte_proportion_fragile": float(np.mean(pred_des)),
     }
 
@@ -104,20 +101,6 @@ def detecter_derive(stats_actuelles, baseline):
             "severite": "MOYENNE",
         })
 
-    # Derive proportion substitution
-    ecart_subst = abs(stats_actuelles["substitution_proportion_classe_1"] -
-                       baseline["substitution_proportion_classe_1"])
-    if ecart_subst > SEUIL_ALERTE_PROPORTION_NUIT:
-        alertes.append({
-            "type": "PREDICTION_DRIFT",
-            "modele": "substitution",
-            "metrique": "proportion_classe_1",
-            "valeur_baseline": baseline["substitution_proportion_classe_1"],
-            "valeur_actuelle": stats_actuelles["substitution_proportion_classe_1"],
-            "ecart_points": round(ecart_subst * 100, 2),
-            "severite": "ELEVEE" if ecart_subst > 0.25 else "MOYENNE",
-        })
-
     # Derive proportion sous-desserte
     ecart_des = abs(stats_actuelles["desserte_proportion_fragile"] -
                      baseline["desserte_proportion_fragile"])
@@ -148,7 +131,6 @@ def ecrire_resultats_bdd(stats, alertes):
                     n_observations INT,
                     co2_moyenne FLOAT,
                     co2_variance FLOAT,
-                    substitution_proportion FLOAT,
                     desserte_proportion FLOAT,
                     nb_alertes INT,
                     alertes_json JSONB
@@ -157,14 +139,12 @@ def ecrire_resultats_bdd(stats, alertes):
             conn.execute(text("""
                 INSERT INTO monitoring_ml_drift
                 (n_observations, co2_moyenne, co2_variance,
-                 substitution_proportion, desserte_proportion,
-                 nb_alertes, alertes_json)
-                VALUES (:n, :m, :v, :s, :d, :na, :aj)
+                 desserte_proportion, nb_alertes, alertes_json)
+                VALUES (:n, :m, :v, :d, :na, :aj)
             """), {
                 "n": stats["n_observations"],
                 "m": stats["co2_moyenne"],
                 "v": stats["co2_variance"],
-                "s": stats["substitution_proportion_classe_1"],
                 "d": stats["desserte_proportion_fragile"],
                 "na": len(alertes),
                 "aj": json.dumps(alertes),
@@ -182,22 +162,17 @@ def main():
 
     # Chargement des modeles
     model_co2 = joblib.load(f"{MODELS_DIR}/best_model_co2.joblib")
-    model_subst = joblib.load(f"{MODELS_DIR}/best_model_nuit.joblib")
     model_des = joblib.load(f"{MODELS_DIR}/best_model_desserte.joblib")
 
     # Chargement des dernieres donnees (jeu de test comme proxy de "donnees recentes")
     X_co2 = pd.read_csv("notebooks/ml_splits/co2_test.csv").drop(columns="co2_emission_kg")
-    X_subst = pd.read_csv("notebooks/ml_splits/nuit_test.csv").drop(columns="type_service_enc")
     X_des = pd.read_csv("notebooks/ml_splits/desserte_test.csv").drop(columns="sous_desserte")
 
-    stats_actuelles = calculer_stats_predictions(
-        model_co2, model_subst, model_des, X_co2, X_subst, X_des
-    )
+    stats_actuelles = calculer_stats_predictions(model_co2, model_des, X_co2, X_des)
 
     print(f"\nStatistiques actuelles ({stats_actuelles['n_observations']:,} observations) :")
     print(f"  CO2 moyenne     : {stats_actuelles['co2_moyenne']:.4f} kg")
     print(f"  CO2 variance    : {stats_actuelles['co2_variance']:.4f}")
-    print(f"  Substitution %  : {stats_actuelles['substitution_proportion_classe_1']*100:.2f} %")
     print(f"  Desserte %      : {stats_actuelles['desserte_proportion_fragile']*100:.2f} %")
 
     baseline = charger_baseline()
@@ -210,7 +185,6 @@ def main():
 
     print(f"\nBaseline de reference (etablie le {baseline['timestamp']}) :")
     print(f"  CO2 moyenne     : {baseline['co2_moyenne']:.4f} kg")
-    print(f"  Substitution %  : {baseline['substitution_proportion_classe_1']*100:.2f} %")
     print(f"  Desserte %      : {baseline['desserte_proportion_fragile']*100:.2f} %")
 
     alertes = detecter_derive(stats_actuelles, baseline)

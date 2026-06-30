@@ -59,21 +59,21 @@ def encode(distance_km, operateur, type_service, type_ligne, heure_depart, scale
     scaled = scaler.transform([[d, co2_par_km_brut]])
     co2_par_km_scaled = float(scaled[0][1])
 
-    # ENJEU 1 — CO2 : 7 features, sans distance directe
+    # ENJEU 1 — CO2 : 5 features (cf. dossier section 12.4)
     feat_co2 = pd.DataFrame([[
-        op_enc, ts_enc, tl_enc,
-        pays_enc, heure_sin, heure_cos, bucket
+        bucket, op_enc, ts_enc,
+        heure_sin, heure_cos
     ]], columns=[
-        'operateur_enc', 'type_service_enc', 'type_ligne_enc',
-        'pays_enc', 'heure_sin', 'heure_cos', 'distance_bucket_enc'
+        'distance_bucket_enc', 'operateur_enc', 'type_service_enc',
+        'heure_sin', 'heure_cos'
     ])
 
-    # ENJEU 2 — SOUS-DESSERTE : 6 features, sans distance directe
+    # ENJEU 2 — SOUS-DESSERTE : 5 features (cf. dossier section 12.4)
     feat_des = pd.DataFrame([[
-        op_enc, pays_enc, tl_enc,
+        op_enc, pays_enc,
         heure_sin, heure_cos, co2_par_km_scaled
     ]], columns=[
-        'operateur_enc', 'pays_enc', 'type_ligne_enc',
+        'operateur_enc', 'pays_enc',
         'heure_sin', 'heure_cos', 'co2_par_km'
     ])
 

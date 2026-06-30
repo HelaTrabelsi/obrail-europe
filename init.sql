@@ -13,12 +13,14 @@ CREATE TABLE IF NOT EXISTS gare (
 );
 
 CREATE TABLE IF NOT EXISTS trajet (
-    id_trajet  SERIAL   PRIMARY KEY,
-    id_gare    INTEGER  NOT NULL REFERENCES gare(id_gare),
-    distance   FLOAT
+    id_trajet       SERIAL   PRIMARY KEY,
+    id_gare         INTEGER  NOT NULL REFERENCES gare(id_gare),
+    id_gare_arrivee INTEGER  REFERENCES gare(id_gare),
+    distance        FLOAT
 );
 
-CREATE INDEX IF NOT EXISTS idx_trajet_gare ON trajet(id_gare);
+CREATE INDEX IF NOT EXISTS idx_trajet_gare        ON trajet(id_gare);
+CREATE INDEX IF NOT EXISTS idx_trajet_gare_arrivee ON trajet(id_gare_arrivee);
 
 CREATE TABLE IF NOT EXISTS train (
     id_train          SERIAL       PRIMARY KEY,

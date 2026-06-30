@@ -10,7 +10,6 @@ SPLITS_DIR = "notebooks/ml_splits"
 
 # Seuils de qualite minimale acceptable en production
 SEUIL_R2_CO2_MIN = 0.75        # en dessous : modele inacceptable
-SEUIL_F1_SUBST_MIN = 0.45      # en dessous : pas mieux qu'un classifieur naif ameliore
 SEUIL_AUC_DESSERTE_MIN = 0.65  # en dessous : proche de l'aleatoire (0.50)
 
 CO2_MAX_PHYSIQUE = 50.0   # kg : aucun trajet ferroviaire ne devrait depasser ca
@@ -21,7 +20,6 @@ CO2_MIN_PHYSIQUE = 0.0    # kg : ne peut pas etre negatif
 def modeles():
     return {
         "co2": joblib.load(f"{MODELS_DIR}/best_model_co2.joblib"),
-        "substitution": joblib.load(f"{MODELS_DIR}/best_model_nuit.joblib"),
         "desserte": joblib.load(f"{MODELS_DIR}/best_model_desserte.joblib"),
     }
 
@@ -32,10 +30,6 @@ def test_sets():
         "co2": (
             pd.read_csv(f"{SPLITS_DIR}/co2_test.csv").drop(columns="co2_emission_kg"),
             pd.read_csv(f"{SPLITS_DIR}/co2_test.csv")["co2_emission_kg"],
-        ),
-        "substitution": (
-            pd.read_csv(f"{SPLITS_DIR}/nuit_test.csv").drop(columns="type_service_enc"),
-            pd.read_csv(f"{SPLITS_DIR}/nuit_test.csv")["type_service_enc"],
         ),
         "desserte": (
             pd.read_csv(f"{SPLITS_DIR}/desserte_test.csv").drop(columns="sous_desserte"),
@@ -55,11 +49,6 @@ class TestIntegritePredicitions:
         preds = modeles["co2"].predict(X)
         assert not np.isnan(preds).any(), "Le modele CO2 produit des NaN"
         assert not np.isinf(preds).any(), "Le modele CO2 produit des Inf"
-
-    def test_substitution_pas_de_nan(self, modeles, test_sets):
-        X, _ = test_sets["substitution"]
-        preds = modeles["substitution"].predict(X)
-        assert not np.isnan(preds).any(), "Le modele substitution produit des NaN"
 
     def test_desserte_pas_de_nan(self, modeles, test_sets):
         X, _ = test_sets["desserte"]
@@ -85,12 +74,6 @@ class TestBornesPhysiques:
         assert (preds <= CO2_MAX_PHYSIQUE).all(), \
             f"Predictions CO2 irrealistes detectees (max={preds.max():.3f} kg)"
 
-    def test_substitution_classes_valides(self, modeles, test_sets):
-        X, _ = test_sets["substitution"]
-        preds = modeles["substitution"].predict(X)
-        assert set(np.unique(preds)).issubset({0, 1}), \
-            "Le modele substitution predit des classes hors {0,1}"
-
     def test_desserte_classes_valides(self, modeles, test_sets):
         X, _ = test_sets["desserte"]
         preds = modeles["desserte"].predict(X)
@@ -112,14 +95,6 @@ class TestDeterminisme:
         np.testing.assert_array_almost_equal(p1, p2, decimal=8,
             err_msg="Le modele CO2 n'est pas deterministe")
 
-    def test_substitution_deterministe(self, modeles, test_sets):
-        X, _ = test_sets["substitution"]
-        sample = X.iloc[:50]
-        p1 = modeles["substitution"].predict(sample)
-        p2 = modeles["substitution"].predict(sample)
-        np.testing.assert_array_equal(p1, p2,
-            err_msg="Le modele substitution n'est pas deterministe")
-
 
 # ============================================================
 # 4. PERFORMANCE MINIMALE — non-regression
@@ -134,14 +109,6 @@ class TestPerformanceMinimale:
         r2 = r2_score(y, preds)
         assert r2 >= SEUIL_R2_CO2_MIN, \
             f"R² CO2 = {r2:.4f} en dessous du seuil minimum {SEUIL_R2_CO2_MIN}"
-
-    def test_substitution_f1_minimum_garanti(self, modeles, test_sets):
-        from sklearn.metrics import f1_score
-        X, y = test_sets["substitution"]
-        preds = modeles["substitution"].predict(X)
-        f1 = f1_score(y, preds, average="weighted")
-        assert f1 >= SEUIL_F1_SUBST_MIN, \
-            f"F1 substitution = {f1:.4f} en dessous du seuil minimum {SEUIL_F1_SUBST_MIN}"
 
     def test_desserte_auc_minimum_garanti(self, modeles, test_sets):
         from sklearn.metrics import roc_auc_score
