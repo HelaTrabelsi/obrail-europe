@@ -1,5 +1,6 @@
-﻿from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import APIKeyHeader
 from sqlalchemy import create_engine, text
 from typing import Optional
 from prometheus_fastapi_instrumentator import Instrumentator
@@ -20,6 +21,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
 )
+
+# ── Authentification par clé API ──
+# La clé est lue depuis la variable d'environnement API_KEY (definie dans .env,
+# jamais versionnee sur Git). /health reste volontairement ouvert pour permettre
+# aux outils de supervision (Docker healthcheck, Prometheus) de fonctionner sans cle.
+API_KEY = os.getenv("API_KEY", "change-me-in-production")
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+def verify_api_key(api_key: str = Security(api_key_header)):
+    if api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Cle API invalide ou manquante")
+    return api_key
 
 Instrumentator().instrument(app).expose(app)
 
@@ -104,6 +117,7 @@ async def startup_event():
 
 @app.get("/health", tags=["Sante"])
 def health():
+    # Volontairement SANS authentification : utilise par les healthchecks Docker/Prometheus.
     if not db_ok():
         raise HTTPException(status_code=503, detail="Base de donnees inaccessible")
     try:
@@ -119,7 +133,7 @@ def health():
         raise HTTPException(status_code=503, detail=str(e))
 
 
-@app.get("/dessertes", tags=["Dessertes"])
+@app.get("/dessertes", tags=["Dessertes"], dependencies=[Depends(verify_api_key)])
 def get_dessertes(skip: int = 0, limit: int = Query(default=100, le=500)):
     try:
         with get_engine().connect() as c:
@@ -131,7 +145,7 @@ def get_dessertes(skip: int = 0, limit: int = Query(default=100, le=500)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/dessertes/search", tags=["Dessertes"])
+@app.get("/dessertes/search", tags=["Dessertes"], dependencies=[Depends(verify_api_key)])
 def search_dessertes(
     gare:         Optional[str]   = None,
     operateur:    Optional[str]   = None,
@@ -160,7 +174,7 @@ def search_dessertes(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/dessertes/{id_train}", tags=["Dessertes"])
+@app.get("/dessertes/{id_train}", tags=["Dessertes"], dependencies=[Depends(verify_api_key)])
 def get_desserte(id_train: int):
     try:
         with get_engine().connect() as c:
@@ -177,7 +191,7 @@ def get_desserte(id_train: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/operateurs", tags=["Referentiels"])
+@app.get("/operateurs", tags=["Referentiels"], dependencies=[Depends(verify_api_key)])
 def get_operateurs():
     try:
         with get_engine().connect() as c:
@@ -195,7 +209,7 @@ def get_operateurs():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/gares", tags=["Referentiels"])
+@app.get("/gares", tags=["Referentiels"], dependencies=[Depends(verify_api_key)])
 def get_gares(nom: Optional[str] = None, limit: int = 100):
     try:
         q = "SELECT id_gare, nom, pays FROM gare"
@@ -211,7 +225,7 @@ def get_gares(nom: Optional[str] = None, limit: int = 100):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/stats", tags=["Statistiques"])
+@app.get("/stats", tags=["Statistiques"], dependencies=[Depends(verify_api_key)])
 def get_stats():
     try:
         with get_engine().connect() as c:
@@ -234,7 +248,7 @@ def get_stats():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/stats/co2", tags=["Statistiques"])
+@app.get("/stats/co2", tags=["Statistiques"], dependencies=[Depends(verify_api_key)])
 def get_stats_co2():
     try:
         with get_engine().connect() as c:
@@ -254,7 +268,7 @@ def get_stats_co2():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/stats/couverture", tags=["Statistiques"])
+@app.get("/stats/couverture", tags=["Statistiques"], dependencies=[Depends(verify_api_key)])
 def get_stats_couverture():
     try:
         with get_engine().connect() as c:
@@ -276,7 +290,7 @@ def get_stats_couverture():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/stats/qualite", tags=["Statistiques"])
+@app.get("/stats/qualite", tags=["Statistiques"], dependencies=[Depends(verify_api_key)])
 def get_stats_qualite():
     try:
         with get_engine().connect() as c:
@@ -304,7 +318,7 @@ def get_stats_qualite():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/stats/sous-desserte", tags=["Statistiques"])
+@app.get("/stats/sous-desserte", tags=["Statistiques"], dependencies=[Depends(verify_api_key)])
 def get_sous_desserte():
     """
     Detecte les zones sous-desservies depuis les trains reels.
@@ -361,7 +375,7 @@ def get_sous_desserte():
 # MLOps — Monitoring de derive des modeles ML
 
 
-@app.get("/stats/ml-monitoring", tags=["MLOps"])
+@app.get("/stats/ml-monitoring", tags=["MLOps"], dependencies=[Depends(verify_api_key)])
 def ml_monitoring_latest():
     """Derniere mesure de derive des modeles ML.
     Utilise par le dashboard Grafana et la page /qualite du frontend."""
@@ -399,7 +413,7 @@ def ml_monitoring_latest():
         }
 
 
-@app.get("/stats/ml-monitoring/history", tags=["MLOps"])
+@app.get("/stats/ml-monitoring/history", tags=["MLOps"], dependencies=[Depends(verify_api_key)])
 def ml_monitoring_history(limit: int = 30):
     """Historique des derniers runs de monitoring de derive
     pour affichage de tendance dans Grafana / frontend."""
@@ -444,7 +458,7 @@ class PredictResponse(BaseModel):
     sous_desserte_label:  str
     modele_desserte:      str
 
-@app.post("/predict", response_model=PredictResponse, tags=["IA"])
+@app.post("/predict", response_model=PredictResponse, tags=["IA"], dependencies=[Depends(verify_api_key)])
 def predict(req: PredictRequest):
     """
     Predit les emissions CO2 d'un trajet ferroviaire
